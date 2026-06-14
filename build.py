@@ -387,6 +387,209 @@ def fetch_oss_security(days=7):
 
 
 # ---------------------------------------------------------------------------
+# Source: Kubernetes official CVE feed
+# ---------------------------------------------------------------------------
+
+def fetch_kubernetes(days=7):
+    log("Fetching Kubernetes CVEs...")
+    url = "https://kubernetes.io/docs/reference/issues-security/official-cve-feed/index.json"
+    raw = http_get(url)
+    if not raw:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as ex:
+        log(f"  Kubernetes JSON error: {ex}")
+        return []
+
+    cut = cutoff_utc(hours=days * 24)
+    results = []
+
+    for item in data.get("items", []):
+        pub = item.get("date_published", "")
+        try:
+            if datetime.fromisoformat(pub.replace("Z", "+00:00")) < cut:
+                continue
+        except Exception:
+            pass
+
+        cve_id = item.get("id", "")
+        summary = item.get("summary", "")
+        content = item.get("content_text", "")
+
+        # Extract CVSS score and severity from content
+        score, severity = None, "UNKNOWN"
+        cvss_m = re.search(
+            r"\*\*(Critical|High|Medium|Low)\s+\((\d+\.?\d*)\)\*\*",
+            content, re.IGNORECASE
+        )
+        if cvss_m:
+            severity = cvss_m.group(1).upper()
+            score = float(cvss_m.group(2))
+
+        # Affected versions block
+        aff_m = re.search(r"#### Affected Versions\s*(.+?)(?=\n###|\Z)", content, re.DOTALL)
+        aff_text = re.sub(r"[\*\n]+", " ", aff_m.group(1)).strip()[:150] if aff_m else ""
+
+        results.append({
+            "id": cve_id,
+            "title": summary or cve_id,
+            "description": re.sub(r"\*\*|#+|\[([^\]]+)\]\([^)]+\)", r"\1", content).strip()[:500],
+            "score": score,
+            "severity": severity,
+            "source": "Kubernetes",
+            "published": pub,
+            "references": [
+                item.get("url", ""),
+                item.get("external_url", ""),
+                f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+            ],
+            "affected": [aff_text] if aff_text else [],
+            "url": item.get("url", f"https://nvd.nist.gov/vuln/detail/{cve_id}"),
+        })
+
+    log(f"  Kubernetes: {len(results)} CVEs")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Source: Exploit-DB
+# ---------------------------------------------------------------------------
+
+def fetch_exploitdb(days=7):
+    log("Fetching Exploit-DB...")
+    raw = http_get("https://www.exploit-db.com/rss.xml")
+    if not raw:
+        return []
+
+    cut = cutoff_utc(hours=days * 24)
+    results = []
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as ex:
+        log(f"  Exploit-DB XML error: {ex}")
+        return []
+
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link  = (item.findtext("link")  or "").strip()
+        desc  = (item.findtext("description") or "").strip()
+        pub   = (item.findtext("pubDate") or "").strip()
+
+        try:
+            if parsedate_to_datetime(pub).astimezone(timezone.utc) < cut:
+                continue
+        except Exception:
+            pass
+
+        # Category from title: "[webapps] Title" → "webapps"
+        cat_m = re.match(r"\[([^\]]+)\]\s*(.+)", title)
+        category = cat_m.group(1) if cat_m else ""
+        clean_title = cat_m.group(2) if cat_m else title
+
+        cves = re.findall(r"CVE-\d{4}-\d+", desc + " " + title)
+
+        results.append({
+            "id": cves[0] if cves else re.search(r"/(\d+)$", link or "").group(1) if link else title[:20],
+            "title": clean_title,
+            "description": f"[{category}] {clean_title}" if category else clean_title,
+            "score": None,
+            "severity": "HIGH",
+            "source": "Exploit-DB",
+            "published": pub,
+            "references": [link],
+            "affected": ([category] if category else []) + cves[:3],
+            "url": link,
+            "badge": "PUBLIC EXPLOIT",
+        })
+
+    log(f"  Exploit-DB: {len(results)} exploits")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Source: Red Hat Security Advisories
+# ---------------------------------------------------------------------------
+
+def fetch_redhat(days=7):
+    log(f"Fetching Red Hat CVEs (last {days} days)...")
+    after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    url = f"https://access.redhat.com/labs/securitydataapi/cve.json?per_page=100&after={after}"
+    raw = http_get(url)
+    if not raw:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as ex:
+        log(f"  Red Hat JSON error: {ex}")
+        return []
+
+    SEV_MAP = {"critical": "CRITICAL", "important": "HIGH", "moderate": "MEDIUM", "low": "LOW"}
+    results = []
+
+    for item in data:
+        cve_id = item.get("CVE", "")
+        if not cve_id:
+            continue
+
+        sev_raw = (item.get("severity") or "").lower()
+        severity = SEV_MAP.get(sev_raw, "UNKNOWN")
+
+        score = None
+        cvss3 = item.get("cvss3", {}) or {}
+        s3 = cvss3.get("cvss3_base_score")
+        if s3:
+            try:
+                score = float(s3)
+            except (ValueError, TypeError):
+                pass
+        if score is None:
+            cvss2 = item.get("cvss", {}) or {}
+            s2 = cvss2.get("cvss_base_score")
+            if s2:
+                try:
+                    score = float(s2)
+                except (ValueError, TypeError):
+                    pass
+
+        pub = item.get("public_date", "")
+        bugzilla = item.get("bugzilla", {}) or {}
+        desc = bugzilla.get("description", "")
+
+        # Affected packages from advisories
+        affected = []
+        for rel in (item.get("affected_release") or [])[:6]:
+            pkg = rel.get("package", "")
+            if pkg:
+                affected.append(pkg)
+
+        rhsa_refs = []
+        for rhsa in (item.get("advisories") or [])[:3]:
+            rhsa_id = rhsa if isinstance(rhsa, str) else rhsa.get("name", "")
+            if rhsa_id:
+                rhsa_refs.append(f"https://access.redhat.com/errata/{rhsa_id}")
+
+        results.append({
+            "id": cve_id,
+            "title": desc[:160] if desc else cve_id,
+            "description": desc,
+            "score": score,
+            "severity": severity,
+            "source": "Red Hat",
+            "published": pub,
+            "references": [f"https://access.redhat.com/security/cve/{cve_id}"] + rhsa_refs,
+            "affected": list(dict.fromkeys(affected))[:8],
+            "url": f"https://access.redhat.com/security/cve/{cve_id}",
+        })
+
+    log(f"  Red Hat: {len(results)} CVEs")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Source: OpenStack Security Notes (OSSNs)
 # ---------------------------------------------------------------------------
 
@@ -739,7 +942,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <div class="logo">vuln<em>feed</em></div>
     <div class="hmeta">__DATE__ &middot; __COUNT__ vulnerabilities</div>
   </div>
-  <div class="hmeta" style="text-align:right">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack</div>
+  <div class="hmeta" style="text-align:right">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat</div>
 </header>
 
 <div class="bar">
@@ -762,6 +965,9 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <button class="pill" data-src="CISA-KEV">CISA KEV</button>
     <button class="pill" data-src="OSS-Security">OSS-Security</button>
     <button class="pill" data-src="OpenStack">OpenStack</button>
+    <button class="pill" data-src="Kubernetes">Kubernetes</button>
+    <button class="pill" data-src="Exploit-DB">Exploit-DB</button>
+    <button class="pill" data-src="Red Hat">Red Hat</button>
   </div>
   <div class="pills">
     <span class="plabel">Period:</span>
@@ -931,6 +1137,9 @@ def main():
     vulns += fetch_debian()
     vulns += fetch_cisa()
     vulns += fetch_oss_security()
+    vulns += fetch_kubernetes()
+    vulns += fetch_exploitdb()
+    vulns += fetch_redhat()
     vulns += fetch_openstack_ossa(months=3)
     vulns += fetch_openstack_ossn(months=3)
 

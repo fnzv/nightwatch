@@ -765,8 +765,8 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   </div>
   <div class="pills">
     <span class="plabel">Period:</span>
-    <button class="pill on" data-range="ALL">All time</button>
-    <button class="pill" data-range="24H">Last 24h</button>
+    <button class="pill" data-range="ALL">All time</button>
+    <button class="pill on" data-range="24H">Last 24h</button>
     <button class="pill" data-range="7D">Last 7 days</button>
     <button class="pill" data-range="30D">Last 30 days</button>
     <button class="pill" data-range="1Y">Last year</button>
@@ -847,7 +847,7 @@ function priority(v){
 
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};
 const SEV_ORDER={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4};
-let aSev="ALL",aSrc="ALL",aRange="ALL",aSort="DATE",q="";
+let aSev="ALL",aSrc="ALL",aRange="24H",aSort="DATE",q="";
 const grid=document.getElementById("grid");
 const visEl=document.getElementById("vis");
 const shint=document.getElementById("shint");

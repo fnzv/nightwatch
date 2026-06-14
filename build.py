@@ -927,11 +927,33 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .refs a{color:var(--accent);text-decoration:none}.refs a:hover{text-decoration:underline}
 .cdate{font-size:.67rem;color:#94a3b8;margin-top:.08rem}
 
+.today-badge{display:inline-flex;align-items:center;gap:.4rem;background:#0c2340;
+  border:1px solid #2563eb;border-radius:6px;padding:.28rem .65rem;font-size:.8rem;font-weight:700;color:#60a5fa}
+.today-dot{width:7px;height:7px;border-radius:50%;background:#22d3ee;flex-shrink:0;
+  box-shadow:0 0 6px #22d3ee;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.sev-brk{font-size:.69rem;color:#475569;margin-top:.28rem;display:flex;gap:.55rem;flex-wrap:wrap}
+.sev-brk b{font-weight:700}
+.sc{color:#f87171}.sh{color:#fb923c}.sm{color:#fbbf24}.sl{color:#4ade80}
+
+#chart-wrap{background:var(--hdr);padding:.5rem 2rem .8rem;border-bottom:1px solid #1e293b}
+#chart-title{font-size:.65rem;color:#475569;margin-bottom:.35rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+#chart{display:flex;align-items:flex-end;gap:4px;height:48px}
+.bcol{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0}
+.bfill{width:100%;border-radius:3px 3px 0 0;background:#2563eb;min-height:2px;position:relative}
+.bfill:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 4px);left:50%;
+  transform:translateX(-50%);background:#0f172a;color:#e2e8f0;font-size:.62rem;
+  white-space:nowrap;padding:.18rem .4rem;border-radius:4px;pointer-events:none;z-index:10}
+.blbl{font-size:.58rem;color:#334155;white-space:nowrap}
+
+.card{cursor:pointer}
+.card.expanded .cdesc{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important}
+
 #empty{display:none;text-align:center;padding:4rem 2rem;color:var(--muted);grid-column:1/-1}
 #empty h2{font-size:1.05rem;margin-bottom:.35rem;color:var(--text)}
 
 @media(max-width:640px){
-  header,.bar,.stats,#grid{padding-left:1rem;padding-right:1rem}
+  header,#chart-wrap,.bar,.stats,#grid{padding-left:1rem;padding-right:1rem}
   #grid{grid-template-columns:1fr}
 }
 </style>
@@ -941,9 +963,18 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   <div>
     <div class="logo">vuln<em>feed</em></div>
     <div class="hmeta">__DATE__ &middot; __COUNT__ vulnerabilities</div>
+    <div class="sev-brk" id="sevBrk"></div>
   </div>
-  <div class="hmeta" style="text-align:right">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat</div>
+  <div style="text-align:right">
+    <div class="today-badge"><span class="today-dot"></span><span id="todayN">&#8203;</span> new today</div>
+    <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat</div>
+  </div>
 </header>
+
+<div id="chart-wrap">
+  <div id="chart-title">Vulnerabilities — last 7 days</div>
+  <div id="chart"></div>
+</div>
 
 <div class="bar">
   <div class="srow">
@@ -1018,6 +1049,39 @@ function timeAgo(ts){
   return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
 }
 
+// --- Today badge ---
+const todayCount=D.filter(v=>v._ts&&(Date.now()-v._ts)<864e5).length;
+document.getElementById("todayN").textContent=todayCount;
+
+// --- Severity breakdown ---
+(function(){
+  const cnt={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0};
+  D.forEach(v=>{const s=SEV(v);if(s in cnt)cnt[s]++;});
+  document.getElementById("sevBrk").innerHTML=
+    `<b class="sc">CRIT ${cnt.CRITICAL}</b><b class="sh">HIGH ${cnt.HIGH}</b>`+
+    `<b class="sm">MED ${cnt.MEDIUM}</b><b class="sl">LOW ${cnt.LOW}</b>`;
+})();
+
+// --- 7-day bar chart ---
+(function(){
+  const DAYS=7,now=Date.now(),DAY=864e5;
+  const counts=Array(DAYS).fill(0);
+  D.forEach(v=>{if(!v._ts)return;const i=Math.floor((now-v._ts)/DAY);if(i>=0&&i<DAYS)counts[i]++;});
+  // counts[0]=today ... counts[6]=6 days ago → reverse for display
+  const bars=counts.slice().reverse();
+  const maxC=Math.max(...bars,1);
+  const labels=bars.map((_,i)=>{
+    const d=new Date(now-(DAYS-1-i)*DAY);
+    return d.toLocaleDateString(undefined,{weekday:"short"});
+  });
+  const wrap=document.getElementById("chart");
+  wrap.innerHTML=bars.map((n,i)=>{
+    const pct=Math.round((n/maxC)*100);
+    const lbl=labels[i];
+    return `<div class="bcol"><div class="bfill" style="height:${Math.max(pct,4)}%" data-tip="${lbl}: ${n}"></div><div class="blbl">${lbl}</div></div>`;
+  }).join("");
+})();
+
 function card(v){
   const sc=v.score!=null?`<span class="b bsc">${v.score.toFixed(1)}</span>`:"";
   const sv=`<span class="b b${SEV(v)}">${SEV(v)}</span>`;
@@ -1030,8 +1094,8 @@ function card(v){
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
   const dsc=v.description?`<div class="cdesc">${esc(v.description)}</div>`:"";
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
-  return `<div class="card" data-sev="${SEV(v)}">
-<div class="ctop"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.id)}</a>
+  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')">
+<div class="ctop"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>
 <div class="bdgs">${sc}${sv}${sr}${xp}</div></div>
 ${ttl}${dsc}
 ${aff?`<div class="chips">${aff}</div>`:""}
@@ -1059,6 +1123,39 @@ const visEl=document.getElementById("vis");
 const shint=document.getElementById("shint");
 const clearBtn=document.getElementById("clear");
 
+// --- URL hash state ---
+function pushHash(){
+  const p=new URLSearchParams();
+  if(q)p.set("q",q);
+  if(aSev!=="ALL")p.set("sev",aSev);
+  if(aSrc!=="ALL")p.set("src",aSrc);
+  if(aRange!=="24H")p.set("range",aRange);
+  if(aSort!=="DATE")p.set("sort",aSort);
+  const s=p.toString();
+  history.replaceState(null,"",s?"#"+s:"#");
+}
+
+function applyHash(){
+  const h=location.hash.slice(1);
+  if(!h)return;
+  const p=new URLSearchParams(h);
+  const qv=p.get("q")||"";
+  const sevv=p.get("sev")||"ALL";
+  const srcv=p.get("src")||"ALL";
+  const rangev=p.get("range")||"24H";
+  const sortv=p.get("sort")||"DATE";
+  q=qv; aSev=sevv; aSrc=srcv; aRange=rangev; aSort=sortv;
+  const srchEl=document.getElementById("search");
+  srchEl.value=qv;
+  ["data-sev","data-src","data-range","data-sort"].forEach(attr=>{
+    const key=attr.replace("data-","");
+    const val={sev:sevv,src:srcv,range:rangev,sort:sortv}[key];
+    document.querySelectorAll(`.pill[${attr}]`).forEach(b=>{
+      b.classList.toggle("on",b.dataset[key]===val);
+    });
+  });
+}
+
 function render(){
   const now=Date.now(),maxAge=RANGES[aRange];
   let vis=D.filter(v=>{
@@ -1078,7 +1175,6 @@ function render(){
     if(pd!==0)return pd;
     if(aSort==="DATE")   return (b._ts||0)-(a._ts||0);
     if(aSort==="SCORE")  return (b.score||0)-(a.score||0);
-    // SEVERITY: use pre-sorted backend order (stable, keep index)
     return (SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
 
@@ -1088,6 +1184,7 @@ function render(){
   clearBtn.style.display=hasQ?"inline":"none";
   grid.innerHTML=vis.map(card).join("")
     +`<div id="empty" style="display:${vis.length===0?"block":"none"}"><h2>No results</h2><p>Try a different keyword or clear the filters.</p></div>`;
+  pushHash();
 }
 
 function bindPills(attr,setter){
@@ -1112,6 +1209,7 @@ srchEl.addEventListener("keydown",ev=>{
 });
 clearBtn.addEventListener("click",()=>{srchEl.value="";q="";render();});
 
+applyHash();
 render();
 </script>
 </body>

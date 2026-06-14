@@ -641,7 +641,7 @@ _HTML = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TLDR Security Daily &mdash; __DATE__</title>
+<title>vulnfeed &mdash; __DATE__</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -736,7 +736,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 <body>
 <header>
   <div>
-    <div class="logo">TLDR <em>Security</em> Daily</div>
+    <div class="logo">vuln<em>feed</em></div>
     <div class="hmeta">__DATE__ &middot; __COUNT__ vulnerabilities</div>
   </div>
   <div class="hmeta" style="text-align:right">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack</div>

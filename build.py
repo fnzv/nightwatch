@@ -9,6 +9,7 @@ Serve:  python3 -m http.server 8080
 """
 
 import json
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,8 @@ from email.utils import parsedate_to_datetime
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 import xml.etree.ElementTree as ET
+
+HISTORICAL_DIR = "historical"
 
 
 # ---------------------------------------------------------------------------
@@ -1344,6 +1347,39 @@ render();
 
 
 # ---------------------------------------------------------------------------
+# Historical persistence
+# ---------------------------------------------------------------------------
+
+def save_historical(vulns, date_str):
+    os.makedirs(HISTORICAL_DIR, exist_ok=True)
+    path = os.path.join(HISTORICAL_DIR, f"{date_str}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(vulns, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"  Saved {len(vulns)} entries → {path}")
+
+
+def load_historical(days=30):
+    """Load the last `days` daily snapshots, excluding today (already in fresh fetch)."""
+    if not os.path.isdir(HISTORICAL_DIR):
+        return []
+    now = datetime.now(timezone.utc)
+    results = []
+    for i in range(1, days + 1):
+        date_str = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        path = os.path.join(HISTORICAL_DIR, f"{date_str}.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            results.extend(data)
+            log(f"  Loaded {len(data)} entries ← {path}")
+        except Exception as ex:
+            log(f"  Error loading {path}: {ex}")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1352,25 +1388,36 @@ def main():
     date_str = datetime.now().strftime("%Y-%m-%d")
     log(f"Date: {date_str}")
 
-    vulns = []
-    vulns += fetch_nvd()
+    # --- Fresh fetch ---
+    fresh = []
+    fresh += fetch_nvd()
 
     time.sleep(2)  # brief pause before hitting more servers
 
-    vulns += fetch_ubuntu()
-    vulns += fetch_debian()
-    vulns += fetch_cisa()
-    vulns += fetch_oss_security()
-    vulns += fetch_github_advisories()
-    vulns += fetch_kubernetes()
-    vulns += fetch_exploitdb()
-    vulns += fetch_redhat()
-    vulns += fetch_openstack_ossa(months=3)
-    vulns += fetch_openstack_ossn(months=3)
+    fresh += fetch_ubuntu()
+    fresh += fetch_debian()
+    fresh += fetch_cisa()
+    fresh += fetch_oss_security()
+    fresh += fetch_github_advisories()
+    fresh += fetch_kubernetes()
+    fresh += fetch_exploitdb()
+    fresh += fetch_redhat()
+    fresh += fetch_openstack_ossa(months=3)
+    fresh += fetch_openstack_ossn(months=3)
 
-    log(f"Raw total: {len(vulns)}")
-    vulns = merge(vulns)
-    log(f"After dedup/sort: {len(vulns)}")
+    log(f"Fresh total: {len(fresh)}")
+
+    # --- Persist today's snapshot ---
+    log("Saving historical snapshot...")
+    save_historical(fresh, date_str)
+
+    # --- Supplement with historical data ---
+    log("Loading historical data (last 30 days)...")
+    historical = load_historical(days=30)
+    log(f"Historical entries loaded: {len(historical)}")
+
+    vulns = merge(fresh + historical)
+    log(f"After dedup/merge: {len(vulns)}")
 
     json_blob = json.dumps(vulns, ensure_ascii=False, separators=(",", ":"))
 

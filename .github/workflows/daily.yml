@@ -6,7 +6,7 @@ on:
   workflow_dispatch:        # also allow manual runs from the Actions tab
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -32,6 +32,14 @@ jobs:
 
       - name: Build digest
         run: python3 build.py
+
+      - name: Commit historical snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add historical/
+          git diff --staged --quiet || git commit -m "data: $(date -u +%Y-%m-%d) snapshot"
+          git push
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

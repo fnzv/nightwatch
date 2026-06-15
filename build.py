@@ -1042,15 +1042,12 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .sev-brk b{font-weight:700}
 .sc{color:#f87171}.sh{color:#fb923c}.sm{color:#fbbf24}.sl{color:#4ade80}
 
-#chart-wrap{background:var(--hdr);padding:.5rem 2rem .8rem;border-bottom:1px solid #1e293b}
-#chart-title{font-size:.65rem;color:#475569;margin-bottom:.35rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-#chart{display:flex;align-items:flex-end;gap:4px;height:48px}
-.bcol{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0}
-.bfill{width:100%;border-radius:3px 3px 0 0;background:#2563eb;min-height:2px;position:relative}
-.bfill:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 4px);left:50%;
-  transform:translateX(-50%);background:#0f172a;color:#e2e8f0;font-size:.62rem;
-  white-space:nowrap;padding:.18rem .4rem;border-radius:4px;pointer-events:none;z-index:10}
-.blbl{font-size:.58rem;color:#334155;white-space:nowrap}
+#chart-wrap{background:var(--hdr);padding:.6rem 2rem .7rem;border-bottom:1px solid #1e293b}
+#chart-title{font-size:.65rem;color:#475569;margin-bottom:.55rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+#chart{position:relative;height:54px}
+#chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.chart-lbl-row{display:flex;margin-top:3px}
+.chart-lbl-row span{flex:1;text-align:center;font-size:.6rem;color:#334155}
 
 .card{cursor:pointer}
 .card.expanded .cdesc{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important}
@@ -1178,26 +1175,37 @@ if(ydayCount>0){
     `<b class="sm">MED ${cnt.MEDIUM}</b><b class="sl">LOW ${cnt.LOW}</b>`;
 })();
 
-// --- 7-day bar chart ---
+// --- 7-day area chart (SVG) ---
 (function(){
-  const DAYS=7,MAX_H=44;
+  const DAYS=7, VW=600, VH=54, PAD=6;
   const counts=Array(DAYS).fill(0);
   D.forEach(v=>{if(!v._ts)return;const i=Math.floor((now-v._ts)/DAY);if(i>=0&&i<DAYS)counts[i]++;});
-  // counts[0]=today, counts[6]=6 days ago → reverse for left-to-right display
-  const bars=counts.slice().reverse();
-  const maxC=Math.max(...bars,1);
-  const labels=bars.map((_,i)=>{
+  const vals=counts.slice().reverse(); // oldest left → newest right
+  const maxV=Math.max(...vals,1);
+  const labels=vals.map((_,i)=>{
     const d=new Date(now-(DAYS-1-i)*DAY);
     return d.toLocaleDateString(undefined,{weekday:"short"});
   });
-  const wrap=document.getElementById("chart");
-  wrap.innerHTML=bars.map((n,i)=>{
-    const h=Math.max(Math.round((n/maxC)*MAX_H),2);
-    const lbl=labels[i];
-    const isToday=i===DAYS-1;
-    const col=isToday?"#3b82f6":"#1e3a5f";
-    return `<div class="bcol"><div class="bfill" style="height:${h}px;background:${col}" data-tip="${lbl}: ${n}"></div><div class="blbl">${lbl}</div></div>`;
+  const xs=vals.map((_,i)=>PAD+(i/(DAYS-1))*(VW-PAD*2));
+  const ys=vals.map(n=>PAD+(1-n/maxV)*(VH-PAD*2));
+  const line=xs.map((x,i)=>(i===0?`M${x.toFixed(1)},${ys[i].toFixed(1)}`:`L${x.toFixed(1)},${ys[i].toFixed(1)}`)).join(" ");
+  const area=line+` L${xs[DAYS-1].toFixed(1)},${VH} L${xs[0].toFixed(1)},${VH} Z`;
+  const dots=xs.map((x,i)=>{
+    const today=i===DAYS-1;
+    return `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${today?3.5:2}" fill="${today?"#60a5fa":"#3b82f6"}" fill-opacity="${today?1:.7}"><title>${labels[i]}: ${vals[i]}</title></circle>`;
   }).join("");
+  const svg=`<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28"/>
+<stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02"/>
+</linearGradient></defs>
+<path d="${area}" fill="url(#cg)"/>
+<path d="${line}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-opacity="0.65" stroke-linejoin="round" stroke-linecap="round"/>
+${dots}</svg>`;
+  const wrap=document.getElementById("chart");
+  wrap.innerHTML=svg+'<div class="chart-lbl-row">'+
+    labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#60a5fa;font-weight:600":""}">${l}</span>`).join("")+
+    '</div>';
 })();
 
 function card(v){

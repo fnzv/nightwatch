@@ -26,8 +26,11 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def http_get(url, timeout=30):
-    req = Request(url, headers={"User-Agent": "tldr-security-aggregator/1.0"})
+def http_get(url, timeout=30, headers=None):
+    h = {"User-Agent": "tldr-security-aggregator/1.0"}
+    if headers:
+        h.update(headers)
+    req = Request(url, headers=h)
     try:
         with urlopen(req, timeout=timeout) as r:
             return r.read()
@@ -46,6 +49,109 @@ def strip_html(s):
 
 def cutoff_utc(hours=24):
     return datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+# ---------------------------------------------------------------------------
+# GitHub Advisories watchlist — edit this list to track specific projects
+# ---------------------------------------------------------------------------
+
+GITHUB_WATCHLIST = [
+    "curl", "openssl", "openssh", "nginx", "traefik",
+    "kubernetes", "containerd", "docker", "runc",
+    "linux", "glibc", "python", "openstack",
+    "gitlab", "jenkins", "grafana", "vault", "terraform",
+    "envoy", "istio", "helm", "etcd", "cilium",
+]
+
+
+# ---------------------------------------------------------------------------
+# Source: GitHub Security Advisories (watchlist)
+# ---------------------------------------------------------------------------
+
+def fetch_github_advisories(days=7):
+    log(f"Fetching GitHub Security Advisories ({len(GITHUB_WATCHLIST)} packages)...")
+    cut = cutoff_utc(hours=days * 24)
+    SEV_MAP = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
+    seen = set()
+    results = []
+    gh_headers = {"Accept": "application/vnd.github+json"}
+
+    for pkg in GITHUB_WATCHLIST:
+        url = (
+            "https://api.github.com/advisories"
+            f"?affects={pkg}&per_page=100&type=reviewed"
+        )
+        raw = http_get(url, headers=gh_headers)
+        if not raw:
+            time.sleep(2)
+            continue
+
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            time.sleep(2)
+            continue
+
+        if not isinstance(items, list):
+            time.sleep(2)
+            continue
+
+        for item in items:
+            ghsa = item.get("ghsa_id", "")
+            if not ghsa or ghsa in seen:
+                continue
+
+            pub = item.get("published_at", "")
+            try:
+                if datetime.fromisoformat(pub.replace("Z", "+00:00")) < cut:
+                    continue
+            except Exception:
+                pass
+
+            seen.add(ghsa)
+
+            cve_id = item.get("cve_id") or ghsa
+            severity = SEV_MAP.get((item.get("severity") or "").lower(), "UNKNOWN")
+
+            score = None
+            cvss = item.get("cvss") or {}
+            try:
+                score = float(cvss["score"]) if cvss.get("score") else None
+            except (ValueError, TypeError):
+                pass
+
+            affected = []
+            for vuln in (item.get("vulnerabilities") or [])[:6]:
+                ep = vuln.get("package") or {}
+                name = ep.get("name", "")
+                eco = ep.get("ecosystem", "")
+                vrange = vuln.get("vulnerable_version_range", "")
+                if name:
+                    label = f"{eco}/{name}" if eco else name
+                    if vrange:
+                        label += f" {vrange}"
+                    affected.append(label)
+
+            html_url = item.get("html_url") or f"https://github.com/advisories/{ghsa}"
+            refs = ([html_url] + [r for r in (item.get("references") or []) if r])[:4]
+
+            results.append({
+                "id": cve_id,
+                "title": (item.get("summary") or cve_id)[:160],
+                "description": (item.get("description") or "")[:500],
+                "score": score,
+                "severity": severity,
+                "source": "GitHub",
+                "published": pub,
+                "references": refs,
+                "affected": affected[:8],
+                "url": html_url,
+            })
+
+        time.sleep(1.5)  # stay well within 60 req/hour unauthenticated limit
+
+    log(f"  GitHub Advisories: {len(results)} advisories")
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -967,7 +1073,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   </div>
   <div style="text-align:right">
     <div class="today-badge"><span class="today-dot"></span><span id="todayN">&#8203;</span> new today &nbsp;<span id="todayDelta" style="font-size:.7rem;font-weight:500;opacity:.85"></span></div>
-    <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat</div>
+    <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub</div>
   </div>
 </header>
 
@@ -999,6 +1105,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <button class="pill" data-src="Kubernetes">Kubernetes</button>
     <button class="pill" data-src="Exploit-DB">Exploit-DB</button>
     <button class="pill" data-src="Red Hat">Red Hat</button>
+    <button class="pill" data-src="GitHub">GitHub</button>
   </div>
   <div class="pills">
     <span class="plabel">Period:</span>
@@ -1246,6 +1353,7 @@ def main():
     vulns += fetch_debian()
     vulns += fetch_cisa()
     vulns += fetch_oss_security()
+    vulns += fetch_github_advisories()
     vulns += fetch_kubernetes()
     vulns += fetch_exploitdb()
     vulns += fetch_redhat()

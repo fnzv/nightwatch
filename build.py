@@ -966,7 +966,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <div class="sev-brk" id="sevBrk"></div>
   </div>
   <div style="text-align:right">
-    <div class="today-badge"><span class="today-dot"></span><span id="todayN">&#8203;</span> new today</div>
+    <div class="today-badge"><span class="today-dot"></span><span id="todayN">&#8203;</span> new today &nbsp;<span id="todayDelta" style="font-size:.7rem;font-weight:500;opacity:.85"></span></div>
     <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat</div>
   </div>
 </header>
@@ -1049,9 +1049,18 @@ function timeAgo(ts){
   return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
 }
 
-// --- Today badge ---
-const todayCount=D.filter(v=>v._ts&&(Date.now()-v._ts)<864e5).length;
+// --- Today badge + day-over-day delta ---
+const DAY=864e5,now=Date.now();
+const todayCount=D.filter(v=>v._ts&&(now-v._ts)<DAY).length;
+const ydayCount=D.filter(v=>v._ts&&(now-v._ts)>=DAY&&(now-v._ts)<2*DAY).length;
 document.getElementById("todayN").textContent=todayCount;
+if(ydayCount>0){
+  const pct=Math.round((todayCount-ydayCount)/ydayCount*100);
+  const sign=pct>=0?"+":"";
+  const col=pct>0?"#4ade80":pct<0?"#f87171":"#94a3b8";
+  document.getElementById("todayDelta").innerHTML=
+    `<span style="color:${col}">${sign}${pct}% vs yesterday</span>`;
+}
 
 // --- Severity breakdown ---
 (function(){
@@ -1064,10 +1073,10 @@ document.getElementById("todayN").textContent=todayCount;
 
 // --- 7-day bar chart ---
 (function(){
-  const DAYS=7,now=Date.now(),DAY=864e5;
+  const DAYS=7,MAX_H=44;
   const counts=Array(DAYS).fill(0);
   D.forEach(v=>{if(!v._ts)return;const i=Math.floor((now-v._ts)/DAY);if(i>=0&&i<DAYS)counts[i]++;});
-  // counts[0]=today ... counts[6]=6 days ago → reverse for display
+  // counts[0]=today, counts[6]=6 days ago → reverse for left-to-right display
   const bars=counts.slice().reverse();
   const maxC=Math.max(...bars,1);
   const labels=bars.map((_,i)=>{
@@ -1076,9 +1085,11 @@ document.getElementById("todayN").textContent=todayCount;
   });
   const wrap=document.getElementById("chart");
   wrap.innerHTML=bars.map((n,i)=>{
-    const pct=Math.round((n/maxC)*100);
+    const h=Math.max(Math.round((n/maxC)*MAX_H),2);
     const lbl=labels[i];
-    return `<div class="bcol"><div class="bfill" style="height:${Math.max(pct,4)}%" data-tip="${lbl}: ${n}"></div><div class="blbl">${lbl}</div></div>`;
+    const isToday=i===DAYS-1;
+    const col=isToday?"#3b82f6":"#1e3a5f";
+    return `<div class="bcol"><div class="bfill" style="height:${h}px;background:${col}" data-tip="${lbl}: ${n}"></div><div class="blbl">${lbl}</div></div>`;
   }).join("");
 })();
 

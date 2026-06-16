@@ -954,6 +954,7 @@ _HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vulnfeed &mdash; __DATE__</title>
+<link rel="alternate" type="application/rss+xml" title="vulnfeed" href="/feed.xml">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -970,6 +971,12 @@ header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}
 .logo em{color:#60a5fa;font-style:normal}
 .hmeta{font-size:.78rem;color:#94a3b8}
+.hsel{background:#1e293b;color:#cbd5e1;border:1px solid #334155;border-radius:5px;
+  padding:.22rem .5rem;font-size:.74rem;cursor:pointer;outline:none}
+.hsel:hover,.hsel:focus{border-color:#475569}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;
+  border:1px solid #334155;border-radius:4px;white-space:nowrap;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
 
 .bar{background:#fff;border-bottom:1px solid var(--border);padding:.7rem 2rem;
   position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.05)}
@@ -1045,6 +1052,27 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .sev-brk b{font-weight:700}
 .sc{color:#f87171}.sh{color:#fb923c}.sm{color:#fbbf24}.sl{color:#4ade80}
 
+#hist-banner{display:none;background:#1e3a5f;color:#93c5fd;font-size:.79rem;font-weight:600;
+  padding:.38rem 2rem;border-bottom:1px solid #1d4ed8;text-align:center}
+
+.view-btn{padding:.22rem .65rem;border-radius:5px;border:1.5px solid var(--border);
+  font-size:.74rem;font-weight:600;cursor:pointer;color:var(--muted);background:var(--bg);
+  transition:all .12s}
+.view-btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+#news-badge{background:#334155;color:#fff;border-radius:10px;padding:.04rem .32rem;
+  font-size:.63rem;margin-left:.2rem}
+
+#news-panel{display:none;padding:.75rem 2rem 3rem}
+.news-item{background:var(--card);border:1px solid var(--border);border-radius:8px;
+  padding:.6rem .9rem;margin-bottom:.4rem}
+.news-row{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.news-title{font-size:.84rem;font-weight:600;color:var(--text);text-decoration:none;flex:1;min-width:0}
+.news-title:hover{color:var(--accent);text-decoration:underline}
+.news-meta{display:flex;gap:.5rem;align-items:center;white-space:nowrap;font-size:.68rem;color:#94a3b8}
+.news-meta a{color:var(--accent);text-decoration:none}
+.news-meta a:hover{text-decoration:underline}
+.news-desc{font-size:.75rem;color:var(--muted);margin-top:.25rem;line-height:1.45}
+
 #chart-wrap{background:var(--hdr);padding:.6rem 2rem .7rem;border-bottom:1px solid #1e293b}
 #chart-title{font-size:.65rem;color:#475569;margin-bottom:.55rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
 #chart{position:relative;height:54px}
@@ -1055,8 +1083,9 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .card{cursor:pointer}
 .card.expanded .cdesc{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important}
 
-#empty{display:none;text-align:center;padding:4rem 2rem;color:var(--muted);grid-column:1/-1}
+#empty{display:none;text-align:center;padding:4rem 2rem;color:var(--muted)}
 #empty h2{font-size:1.05rem;margin-bottom:.35rem;color:var(--text)}
+#sentinel{height:1px}
 
 @media(max-width:640px){
   header,#chart-wrap,.bar,.stats,#grid{padding-left:1rem;padding-right:1rem}
@@ -1074,8 +1103,14 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   <div style="text-align:right">
     <div class="today-badge"><span class="today-dot"></span><span id="todayN">&#8203;</span> new today &nbsp;<span id="todayDelta" style="font-size:.7rem;font-weight:500;opacity:.85"></span></div>
     <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub</div>
+    <div style="margin-top:.5rem;display:flex;gap:.4rem;align-items:center;justify-content:flex-end;flex-wrap:wrap">
+      <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
+      <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
+      <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
+    </div>
   </div>
 </header>
+<div id="hist-banner"></div>
 
 <div id="chart-wrap">
   <div id="chart-title">Vulnerabilities — last 7 days</div>
@@ -1123,92 +1158,82 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 </div>
 
 <div class="stats">
-  <span>Showing <strong id="vis">0</strong> of <strong>__COUNT__</strong></span>
-  <span id="shint" style="display:none">Press <kbd>Esc</kbd> to clear</span>
+  <span>Showing <strong id="vis">0</strong> of <strong>__COUNT__</strong> &nbsp;<span id="shint" style="display:none">— Press <kbd>Esc</kbd> to clear</span></span>
+  <div style="display:flex;gap:.35rem;align-items:center">
+    <button class="view-btn on" data-view="vulns">Vulnerabilities</button>
+    <button class="view-btn" data-view="news">Security News <span id="news-badge">0</span></button>
+  </div>
 </div>
 
-<div id="grid">
-  <div id="empty"><h2>No results</h2><p>Try a different keyword or clear the filters.</p></div>
-</div>
+<div id="grid"></div>
+<div id="empty"><h2>No results</h2><p>Try a different keyword or clear the filters.</p></div>
+<div id="sentinel"></div>
+<div id="news-panel"></div>
 
 <script>
-const D=__JSON__;
+let D=__JSON__;
+const D_TODAY=D;
+const DATES=__DATES_JSON__;
+const NEWS=__NEWS_JSON__;
 
-// Precompute timestamps once
 D.forEach(v=>{v._ts=v.published?new Date(v.published).getTime()||0:0});
+NEWS.forEach(n=>{n._ts=n.published?new Date(n.published).getTime()||0:0});
 
 const SEV=v=>v.severity||"UNKNOWN";
-function esc(s){
-  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
+function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function host(u){try{return new URL(u).hostname}catch(_){return String(u).slice(0,30)}}
 function timeAgo(ts){
   if(!ts)return"";
   const d=Date.now()-ts,m=Math.floor(d/60000);
-  if(m<2)return"just now";
-  if(m<60)return m+"m ago";
-  const h=Math.floor(m/60);
-  if(h<24)return h+"h ago";
-  const dy=Math.floor(h/24);
-  if(dy<7)return dy+"d ago";
-  const w=Math.floor(dy/7);
-  if(w<5)return w+"w ago";
+  if(m<2)return"just now";if(m<60)return m+"m ago";
+  const h=Math.floor(m/60);if(h<24)return h+"h ago";
+  const dy=Math.floor(h/24);if(dy<7)return dy+"d ago";
+  const w=Math.floor(dy/7);if(w<5)return w+"w ago";
   return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
 }
 
-// --- Today badge + day-over-day delta ---
 const DAY=864e5,now=Date.now();
-const todayCount=D.filter(v=>v._ts&&(now-v._ts)<DAY).length;
-const ydayCount=D.filter(v=>v._ts&&(now-v._ts)>=DAY&&(now-v._ts)<2*DAY).length;
-document.getElementById("todayN").textContent=todayCount;
-if(ydayCount>0){
-  const pct=Math.round((todayCount-ydayCount)/ydayCount*100);
-  const sign=pct>=0?"+":"";
-  const col=pct>0?"#4ade80":pct<0?"#f87171":"#94a3b8";
-  document.getElementById("todayDelta").innerHTML=
-    `<span style="color:${col}">${sign}${pct}% vs yesterday</span>`;
-}
 
-// --- Severity breakdown ---
+// Today badge (always live data)
 (function(){
+  const tc=D_TODAY.filter(v=>v._ts&&(now-v._ts)<DAY).length;
+  const yc=D_TODAY.filter(v=>v._ts&&(now-v._ts)>=DAY&&(now-v._ts)<2*DAY).length;
+  document.getElementById("todayN").textContent=tc;
+  if(yc>0){
+    const pct=Math.round((tc-yc)/yc*100),sign=pct>=0?"+":"";
+    const col=pct>0?"#4ade80":pct<0?"#f87171":"#94a3b8";
+    document.getElementById("todayDelta").innerHTML=`<span style="color:${col}">${sign}${pct}% vs yesterday</span>`;
+  }
+})();
+
+function updateSevBrk(){
   const cnt={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0};
   D.forEach(v=>{const s=SEV(v);if(s in cnt)cnt[s]++;});
   document.getElementById("sevBrk").innerHTML=
     `<b class="sc">CRIT ${cnt.CRITICAL}</b><b class="sh">HIGH ${cnt.HIGH}</b>`+
     `<b class="sm">MED ${cnt.MEDIUM}</b><b class="sl">LOW ${cnt.LOW}</b>`;
-})();
+}
+updateSevBrk();
 
-// --- 7-day area chart (SVG) ---
+// 7-day chart (always live data)
 (function(){
-  const DAYS=7, VW=600, VH=54, PAD=6;
+  const DAYS=7,VW=600,VH=54,PAD=6;
   const counts=Array(DAYS).fill(0);
-  D.forEach(v=>{if(!v._ts)return;const i=Math.floor((now-v._ts)/DAY);if(i>=0&&i<DAYS)counts[i]++;});
-  const vals=counts.slice().reverse(); // oldest left → newest right
+  D_TODAY.forEach(v=>{if(!v._ts)return;const i=Math.floor((now-v._ts)/DAY);if(i>=0&&i<DAYS)counts[i]++;});
+  const vals=counts.slice().reverse();
   const maxV=Math.max(...vals,1);
-  const labels=vals.map((_,i)=>{
-    const d=new Date(now-(DAYS-1-i)*DAY);
-    return d.toLocaleDateString(undefined,{weekday:"short"});
-  });
+  const labels=vals.map((_,i)=>new Date(now-(DAYS-1-i)*DAY).toLocaleDateString(undefined,{weekday:"short"}));
   const xs=vals.map((_,i)=>PAD+(i/(DAYS-1))*(VW-PAD*2));
   const ys=vals.map(n=>PAD+(1-n/maxV)*(VH-PAD*2));
   const line=xs.map((x,i)=>(i===0?`M${x.toFixed(1)},${ys[i].toFixed(1)}`:`L${x.toFixed(1)},${ys[i].toFixed(1)}`)).join(" ");
   const area=line+` L${xs[DAYS-1].toFixed(1)},${VH} L${xs[0].toFixed(1)},${VH} Z`;
   const dots=xs.map((x,i)=>{
-    const today=i===DAYS-1;
-    return `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${today?3.5:2}" fill="${today?"#60a5fa":"#3b82f6"}" fill-opacity="${today?1:.7}"><title>${labels[i]}: ${vals[i]}</title></circle>`;
+    const t=i===DAYS-1;
+    return `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${t?3.5:2}" fill="${t?"#60a5fa":"#3b82f6"}" fill-opacity="${t?1:.7}"><title>${labels[i]}: ${vals[i]}</title></circle>`;
   }).join("");
-  const svg=`<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-<defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-<stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28"/>
-<stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02"/>
-</linearGradient></defs>
-<path d="${area}" fill="url(#cg)"/>
-<path d="${line}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-opacity="0.65" stroke-linejoin="round" stroke-linecap="round"/>
-${dots}</svg>`;
-  const wrap=document.getElementById("chart");
-  wrap.innerHTML=svg+'<div class="chart-lbl-row">'+
-    labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#60a5fa;font-weight:600":""}">${l}</span>`).join("")+
-    '</div>';
+  document.getElementById("chart").innerHTML=
+    `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28"/><stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02"/></linearGradient></defs><path d="${area}" fill="url(#cg)"/><path d="${line}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-opacity="0.65" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>`+
+    '<div class="chart-lbl-row">'+labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#60a5fa;font-weight:600":""}">${l}</span>`).join("")+'</div>';
 })();
 
 function card(v){
@@ -1217,28 +1242,24 @@ function card(v){
   const sr=`<span class="b bsrc">${esc(v.source)}</span>`;
   const xp=v.badge?`<span class="b bxpl">${esc(v.badge)}</span>`:"";
   const aff=(v.affected||[]).slice(0,6).map(a=>`<span class="chip">${esc(a)}</span>`).join("");
-  const rfs=(v.references||[]).filter(Boolean).slice(0,3)
-    .map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`)
-    .join(" &middot; ");
+  const rfs=(v.references||[]).filter(Boolean).slice(0,3).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`).join(" &middot; ");
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
   const dsc=v.description?`<div class="cdesc">${esc(v.description)}</div>`:"";
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
-  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')">
-<div class="ctop"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>
-<div class="bdgs">${sc}${sv}${sr}${xp}</div></div>
-${ttl}${dsc}
-${aff?`<div class="chips">${aff}</div>`:""}
-${rfs?`<div class="refs">${rfs}</div>`:""}
-${dt}</div>`;
+  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a><div class="bdgs">${sc}${sv}${sr}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
-// Software that always floats to the top when matched
-const PRIORITY=[
-  "kubernetes","k8s","nginx","openstack","traefik","apache httpd","apache2",
-  "openssh","docker","containerd","linux kernel","glibc","openssl","log4j",
-  "gitlab","jenkins","grafana","prometheus","istio","vault","terraform"
-];
+function newsItem(n){
+  const src=`<span class="b bsrc" style="flex-shrink:0">${esc(n.source)}</span>`;
+  const sc=n.score!=null?`${n.score}pts`:""
+  const cmt=n.comments_url?`<a href="${esc(n.comments_url)}" target="_blank" rel="noopener">${n.comments} comments</a>`:"";
+  const dt=n._ts?timeAgo(n._ts):"";
+  const meta=[sc,cmt,dt].filter(Boolean).join(" · ");
+  const desc=n.description?`<div class="news-desc">${esc(n.description)}</div>`:"";
+  return `<div class="news-item"><div class="news-row">${src}<a class="news-title" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="news-meta">${meta}</div></div>${desc}</div>`;
+}
 
+const PRIORITY=["kubernetes","k8s","nginx","openstack","traefik","apache httpd","apache2","openssh","docker","containerd","linux kernel","glibc","openssl","log4j","gitlab","jenkins","grafana","prometheus","istio","vault","terraform"];
 function priority(v){
   const hay=[v.id,v.title,v.description,...(v.affected||[])].join(" ").toLowerCase();
   return PRIORITY.some(t=>hay.includes(t))?1:0;
@@ -1247,103 +1268,352 @@ function priority(v){
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};
 const SEV_ORDER={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4};
 let aSev="ALL",aSrc="ALL",aRange="24H",aSort="DATE",q="";
+
 const grid=document.getElementById("grid");
+const emptyEl=document.getElementById("empty");
 const visEl=document.getElementById("vis");
 const shint=document.getElementById("shint");
 const clearBtn=document.getElementById("clear");
+const histBanner=document.getElementById("hist-banner");
+const newsPanel=document.getElementById("news-panel");
+const sentinelEl=document.getElementById("sentinel");
 
 // --- URL hash state ---
 function pushHash(){
   const p=new URLSearchParams();
-  if(q)p.set("q",q);
-  if(aSev!=="ALL")p.set("sev",aSev);
-  if(aSrc!=="ALL")p.set("src",aSrc);
-  if(aRange!=="24H")p.set("range",aRange);
-  if(aSort!=="DATE")p.set("sort",aSort);
-  const s=p.toString();
-  history.replaceState(null,"",s?"#"+s:"#");
+  if(q)p.set("q",q);if(aSev!=="ALL")p.set("sev",aSev);if(aSrc!=="ALL")p.set("src",aSrc);
+  if(aRange!=="24H")p.set("range",aRange);if(aSort!=="DATE")p.set("sort",aSort);
+  const s=p.toString();history.replaceState(null,"",s?"#"+s:"#");
 }
-
 function applyHash(){
-  const h=location.hash.slice(1);
-  if(!h)return;
+  const h=location.hash.slice(1);if(!h)return;
   const p=new URLSearchParams(h);
-  const qv=p.get("q")||"";
-  const sevv=p.get("sev")||"ALL";
-  const srcv=p.get("src")||"ALL";
-  const rangev=p.get("range")||"24H";
-  const sortv=p.get("sort")||"DATE";
-  q=qv; aSev=sevv; aSrc=srcv; aRange=rangev; aSort=sortv;
-  const srchEl=document.getElementById("search");
-  srchEl.value=qv;
+  q=p.get("q")||"";aSev=p.get("sev")||"ALL";aSrc=p.get("src")||"ALL";
+  aRange=p.get("range")||"24H";aSort=p.get("sort")||"DATE";
+  document.getElementById("search").value=q;
   ["data-sev","data-src","data-range","data-sort"].forEach(attr=>{
     const key=attr.replace("data-","");
-    const val={sev:sevv,src:srcv,range:rangev,sort:sortv}[key];
-    document.querySelectorAll(`.pill[${attr}]`).forEach(b=>{
-      b.classList.toggle("on",b.dataset[key]===val);
-    });
+    const val={sev:aSev,src:aSrc,range:aRange,sort:aSort}[key];
+    document.querySelectorAll(`.pill[${attr}]`).forEach(b=>b.classList.toggle("on",b.dataset[key]===val));
   });
 }
 
-function render(){
-  const now=Date.now(),maxAge=RANGES[aRange];
-  let vis=D.filter(v=>{
+// --- Virtual scroll ---
+let visData=[],rendered=0;
+const BATCH=60;
+
+function applyFilters(){
+  const now2=Date.now(),maxAge=RANGES[aRange];
+  visData=D.filter(v=>{
     if(aSev!=="ALL"&&SEV(v)!==aSev)return false;
     if(aSrc!=="ALL"&&v.source!==aSrc)return false;
-    if(maxAge!==Infinity&&(now-(v._ts||0))>maxAge)return false;
+    if(maxAge!==Infinity&&(now2-(v._ts||0))>maxAge)return false;
     if(q){
       const hay=[v.id,v.title,v.description,...(v.affected||[]),...(v.references||[])].join(" ").toLowerCase();
-      return q.trim().split(/\s+/).every(w=>hay.includes(w));
+      return q.trim().split(/\\s+/).every(w=>hay.includes(w));
     }
     return true;
   });
-
-  // Priority items always float to the top, then apply chosen sort within each tier
-  vis=[...vis].sort((a,b)=>{
-    const pd=priority(b)-priority(a);
-    if(pd!==0)return pd;
-    if(aSort==="DATE")   return (b._ts||0)-(a._ts||0);
-    if(aSort==="SCORE")  return (b.score||0)-(a.score||0);
-    return (SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
+  visData.sort((a,b)=>{
+    const pd=priority(b)-priority(a);if(pd!==0)return pd;
+    if(aSort==="DATE")return(b._ts||0)-(a._ts||0);
+    if(aSort==="SCORE")return(b.score||0)-(a.score||0);
+    return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
-
-  visEl.textContent=vis.length;
-  const hasQ=!!q;
-  shint.style.display=hasQ?"inline":"none";
-  clearBtn.style.display=hasQ?"inline":"none";
-  grid.innerHTML=vis.map(card).join("")
-    +`<div id="empty" style="display:${vis.length===0?"block":"none"}"><h2>No results</h2><p>Try a different keyword or clear the filters.</p></div>`;
-  pushHash();
+  visEl.textContent=visData.length;
+  shint.style.display=q?"inline":"none";
+  clearBtn.style.display=q?"inline":"none";
+  rendered=0;grid.innerHTML="";
+  emptyEl.style.display=visData.length===0?"block":"none";
+  renderBatch();pushHash();
 }
 
+function renderBatch(){
+  if(rendered>=visData.length)return;
+  const end=Math.min(rendered+BATCH,visData.length);
+  const frag=document.createDocumentFragment();
+  for(let i=rendered;i<end;i++){
+    const tmp=document.createElement("div");
+    tmp.innerHTML=card(visData[i]);
+    frag.appendChild(tmp.firstChild);
+  }
+  grid.appendChild(frag);
+  rendered=end;
+}
+
+new IntersectionObserver(
+  entries=>{if(entries[0].isIntersecting)renderBatch();},
+  {rootMargin:"300px"}
+).observe(sentinelEl);
+
+// --- Pill filters ---
 function bindPills(attr,setter){
   document.querySelectorAll(`.pill[${attr}]`).forEach(b=>b.addEventListener("click",()=>{
     setter(b.dataset[attr.replace("data-","")]);
     document.querySelectorAll(`.pill[${attr}]`).forEach(x=>x.classList.remove("on"));
-    b.classList.add("on"); render();
+    b.classList.add("on");applyFilters();
   }));
 }
-bindPills("data-sev",v=>aSev=v);
-bindPills("data-src",v=>aSrc=v);
-bindPills("data-range",v=>aRange=v);
-bindPills("data-sort",v=>aSort=v);
+bindPills("data-sev",v=>aSev=v);bindPills("data-src",v=>aSrc=v);
+bindPills("data-range",v=>aRange=v);bindPills("data-sort",v=>aSort=v);
 
+// --- Search ---
 let t;
 const srchEl=document.getElementById("search");
-srchEl.addEventListener("input",function(){
-  clearTimeout(t); t=setTimeout(()=>{ q=this.value.toLowerCase(); render(); },100);
+srchEl.addEventListener("input",function(){clearTimeout(t);t=setTimeout(()=>{q=this.value.toLowerCase();applyFilters();},100);});
+srchEl.addEventListener("keydown",ev=>{if(ev.key==="Escape"){srchEl.value="";q="";applyFilters();}});
+clearBtn.addEventListener("click",()=>{srchEl.value="";q="";applyFilters();});
+
+// --- Historical date picker ---
+const TODAY_STR="__DATE__";
+const datePicker=document.getElementById("datePicker");
+DATES.forEach(d=>{
+  if(d===TODAY_STR)return;
+  const opt=document.createElement("option");
+  opt.value=d;
+  opt.textContent=new Date(d+"T12:00:00Z").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+  datePicker.appendChild(opt);
 });
-srchEl.addEventListener("keydown",ev=>{
-  if(ev.key==="Escape"){srchEl.value="";q="";render();}
+datePicker.addEventListener("change",async()=>{
+  const val=datePicker.value;
+  if(!val){
+    D=D_TODAY;histBanner.style.display="none";updateSevBrk();applyFilters();return;
+  }
+  histBanner.style.display="block";histBanner.textContent="Loading "+val+"…";
+  try{
+    const resp=await fetch("historical/"+val+".json");
+    if(!resp.ok)throw new Error("HTTP "+resp.status);
+    const data=await resp.json();
+    data.forEach(v=>{v._ts=v.published?new Date(v.published).getTime()||0:0;});
+    D=data;
+    histBanner.textContent="Snapshot: "+val+" — "+data.length.toLocaleString()+" entries";
+    if(aRange!=="ALL"){
+      aRange="ALL";
+      document.querySelectorAll(".pill[data-range]").forEach(b=>b.classList.remove("on"));
+      document.querySelector(".pill[data-range='ALL']").classList.add("on");
+    }
+    updateSevBrk();applyFilters();
+  }catch(e){histBanner.textContent="Failed to load "+val+": "+e.message;}
 });
-clearBtn.addEventListener("click",()=>{srchEl.value="";q="";render();});
+
+// --- View switcher (Vulnerabilities / News) ---
+document.getElementById("news-badge").textContent=NEWS.length;
+let newsRendered=false;
+function renderNews(){
+  if(newsRendered)return;
+  const sorted=[...NEWS].sort((a,b)=>(b._ts||0)-(a._ts||0));
+  newsPanel.innerHTML=sorted.length?sorted.map(newsItem).join(""):"<p style='padding:2rem;color:var(--muted)'>No news items available.</p>";
+  newsRendered=true;
+}
+function setView(view){
+  const isNews=view==="news";
+  grid.style.display=isNews?"none":"grid";
+  emptyEl.style.display=isNews?"none":(visData.length===0?"block":"none");
+  sentinelEl.style.display=isNews?"none":"block";
+  newsPanel.style.display=isNews?"block":"none";
+  document.querySelector(".bar").style.display=isNews?"none":"block";
+  document.querySelector(".stats .view-btn[data-view='vulns']").classList.toggle("on",!isNews);
+  document.querySelector(".stats .view-btn[data-view='news']").classList.toggle("on",isNews);
+  if(isNews)renderNews();
+}
+document.querySelectorAll(".view-btn[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
 
 applyHash();
-render();
+applyFilters();
 </script>
 </body>
 </html>
 """
+
+
+# ---------------------------------------------------------------------------
+# News feeds
+# ---------------------------------------------------------------------------
+
+def fetch_news(days=3):
+    log(f"Fetching security news (last {days} days)...")
+    cut = cutoff_utc(hours=days * 24)
+    results = []
+
+    rss_sources = [
+        ("Bleeping Computer",  "https://www.bleepingcomputer.com/feed/"),
+        ("The Hacker News",    "https://thehackernews.com/feeds/posts/default"),
+        ("Krebs on Security",  "https://krebsonsecurity.com/feed/"),
+        ("Security Week",      "https://www.securityweek.com/feed/"),
+    ]
+
+    for src_name, feed_url in rss_sources:
+        raw = http_get(feed_url)
+        if not raw:
+            continue
+        try:
+            root = ET.fromstring(raw)
+        except ET.ParseError as ex:
+            log(f"  {src_name} XML error: {ex}")
+            continue
+
+        # Support both RSS <item> and Atom <entry>
+        ns_atom = "http://www.w3.org/2005/Atom"
+        items = list(root.iter("item")) or list(root.iter(f"{{{ns_atom}}}entry"))
+        for item in items:
+            def _t(tag):
+                return (item.findtext(tag) or item.findtext(f"{{{ns_atom}}}{tag}") or "").strip()
+
+            title = _t("title")
+            link  = _t("link")
+            # Atom link is an attribute
+            if not link:
+                el = item.find(f"{{{ns_atom}}}link")
+                link = (el.get("href", "") if el is not None else "").strip()
+            pub   = _t("pubDate") or _t("published") or _t("updated")
+            desc  = strip_html(_t("description") or _t("summary"))[:300]
+
+            if not title or not link:
+                continue
+            try:
+                raw_dt = pub.replace("Z", "+00:00")
+                try:
+                    dt = datetime.fromisoformat(raw_dt)
+                except ValueError:
+                    dt = parsedate_to_datetime(pub).astimezone(timezone.utc)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt < cut:
+                    continue
+                pub_iso = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                pub_iso = pub
+
+            results.append({
+                "title": title,
+                "url": link,
+                "source": src_name,
+                "description": desc,
+                "published": pub_iso,
+                "score": None,
+                "comments": None,
+                "comments_url": None,
+            })
+
+        time.sleep(0.5)
+
+    # Hacker News security stories via Algolia
+    hn_after = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+    raw = http_get(
+        "https://hn.algolia.com/api/v1/search"
+        "?query=security+vulnerability+CVE&tags=story"
+        f"&numericFilters=created_at_i%3E{hn_after}&hitsPerPage=30"
+    )
+    if raw:
+        try:
+            for hit in json.loads(raw).get("hits", []):
+                oid = hit.get("objectID", "")
+                url = hit.get("url") or f"https://news.ycombinator.com/item?id={oid}"
+                results.append({
+                    "title": hit.get("title", ""),
+                    "url": url,
+                    "source": "Hacker News",
+                    "description": "",
+                    "published": hit.get("created_at", ""),
+                    "score": hit.get("points"),
+                    "comments": hit.get("num_comments"),
+                    "comments_url": f"https://news.ycombinator.com/item?id={oid}" if oid else None,
+                })
+        except json.JSONDecodeError:
+            pass
+
+    log(f"  News: {len(results)} items")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# API outputs
+# ---------------------------------------------------------------------------
+
+def write_json_api(vulns):
+    with open("vulns.json", "w", encoding="utf-8") as f:
+        json.dump(vulns, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"  Written: vulns.json ({len(vulns)} entries)")
+
+
+def _rfc822(pub):
+    if not pub:
+        return ""
+    for parse in (
+        lambda s: datetime.fromisoformat(s.replace("Z", "+00:00")),
+        lambda s: parsedate_to_datetime(s).astimezone(timezone.utc),
+        lambda s: datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc),
+    ):
+        try:
+            dt = parse(pub)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+        except Exception:
+            continue
+    return ""
+
+
+def write_rss(vulns, base_url="https://nightwatch.sami.pw"):
+    def xe(s):
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    recent = sorted(
+        [v for v in vulns if v.get("published")],
+        key=lambda v: v.get("published", ""),
+        reverse=True,
+    )[:100]
+
+    def _item_xml(v):
+        title = xe(("[%s] %s: %s" % (v.get("severity", "?"), v["id"], v.get("title", "")))[:200])
+        link  = xe(v.get("url", ""))
+        desc  = xe((v.get("description") or "")[:500])
+        pub   = _rfc822(v.get("published", ""))
+        guid  = xe(v.get("url") or v["id"])
+        return (
+            "  <item>\n"
+            f"    <title>{title}</title>\n"
+            f"    <link>{link}</link>\n"
+            f"    <description>{desc}</description>\n"
+            f"    <pubDate>{pub}</pubDate>\n"
+            f'    <guid isPermaLink="false">{guid}</guid>\n'
+            "  </item>"
+        )
+
+    items_xml = "\n".join(_item_xml(v) for v in recent)
+
+    now_rfc = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    with open("feed.xml", "w", encoding="utf-8") as f:
+        f.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+            "  <channel>\n"
+            "    <title>vulnfeed</title>\n"
+            f"    <link>{base_url}</link>\n"
+            "    <description>Daily security vulnerability feed — NVD, CISA KEV, Ubuntu, Debian, "
+            "Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub, OpenStack</description>\n"
+            "    <language>en-us</language>\n"
+            f"    <lastBuildDate>{now_rfc}</lastBuildDate>\n"
+            f'    <atom:link href="{base_url}/feed.xml" rel="self" type="application/rss+xml"/>\n'
+            f"{items_xml}\n"
+            "  </channel>\n"
+            "</rss>"
+        )
+    log(f"  Written: feed.xml ({len(recent)} entries)")
+
+
+def build_historical_index():
+    if not os.path.isdir(HISTORICAL_DIR):
+        return []
+    dates = sorted(
+        [f[:-5] for f in os.listdir(HISTORICAL_DIR)
+         if re.match(r"^\d{4}-\d{2}-\d{2}\.json$", f)],
+        reverse=True,
+    )
+    with open(os.path.join(HISTORICAL_DIR, "index.json"), "w", encoding="utf-8") as f:
+        json.dump({"dates": dates}, f)
+    log(f"  Written: historical/index.json ({len(dates)} dates)")
+    return dates
 
 
 # ---------------------------------------------------------------------------
@@ -1392,7 +1662,7 @@ def main():
     fresh = []
     fresh += fetch_nvd()
 
-    time.sleep(2)  # brief pause before hitting more servers
+    time.sleep(2)
 
     fresh += fetch_ubuntu()
     fresh += fetch_debian()
@@ -1407,9 +1677,11 @@ def main():
 
     log(f"Fresh total: {len(fresh)}")
 
-    # --- Persist today's snapshot ---
+    # --- Persist today's snapshot + build historical index ---
     log("Saving historical snapshot...")
     save_historical(fresh, date_str)
+    log("Building historical index...")
+    hist_dates = build_historical_index()
 
     # --- Supplement with historical data ---
     log("Loading historical data (last 30 days)...")
@@ -1419,12 +1691,24 @@ def main():
     vulns = merge(fresh + historical)
     log(f"After dedup/merge: {len(vulns)}")
 
-    json_blob = json.dumps(vulns, ensure_ascii=False, separators=(",", ":"))
+    # --- News ---
+    news = fetch_news(days=3)
+
+    # --- API outputs ---
+    log("Writing API outputs...")
+    write_json_api(vulns)
+    write_rss(vulns)
+
+    json_blob  = json.dumps(vulns,     ensure_ascii=False, separators=(",", ":"))
+    news_blob  = json.dumps(news,      ensure_ascii=False, separators=(",", ":"))
+    dates_blob = json.dumps(hist_dates)
 
     html = _HTML
-    html = html.replace("__DATE__", date_str)
-    html = html.replace("__COUNT__", str(len(vulns)))
-    html = html.replace("__JSON__", json_blob)
+    html = html.replace("__DATE__",       date_str)
+    html = html.replace("__COUNT__",      str(len(vulns)))
+    html = html.replace("__JSON__",       json_blob)
+    html = html.replace("__DATES_JSON__", dates_blob)
+    html = html.replace("__NEWS_JSON__",  news_blob)
 
     out = "index.html"
     with open(out, "w", encoding="utf-8") as f:

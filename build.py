@@ -1622,7 +1622,7 @@ function applyHash(){
   const h=location.hash.slice(1);if(!h)return;
   const p=new URLSearchParams(h);
   q=p.get("q")||"";aSev=p.get("sev")||"ALL";aSrc=p.get("src")||"ALL";
-  aRange=p.get("range")||"24H";aSort=p.get("sort")||"DATE";
+  aRange=p.get("range")||(p.get("q")?"ALL":"24H");aSort=p.get("sort")||"DATE";
   aNew=p.get("new")==="1";
   document.getElementById("search").value=q;
   document.getElementById("newPill").classList.toggle("on",aNew);

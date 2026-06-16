@@ -62,34 +62,33 @@ def cutoff_utc(hours=24):
 
 
 # ---------------------------------------------------------------------------
-# GitHub Advisories watchlist — edit this list to track specific projects
+# GitHub Advisories: ecosystems to watch (covers Go, Python, npm, Rust, Java, .NET, Ruby)
+# The affects= filter doesn't work for C libraries (curl, openssl etc) — those come via NVD.
+# Querying by ecosystem + date is more reliable and covers all packages in each ecosystem.
 # ---------------------------------------------------------------------------
 
-GITHUB_WATCHLIST = [
-    "curl", "openssl", "openssh", "nginx", "traefik",
-    "kubernetes", "containerd", "docker", "runc",
-    "linux", "glibc", "python", "openstack",
-    "gitlab", "jenkins", "grafana", "vault", "terraform",
-    "envoy", "istio", "helm", "etcd", "cilium",
-]
+GITHUB_ECOSYSTEMS = ["go", "pip", "npm", "rust", "maven", "nuget", "rubygems"]
 
 
 # ---------------------------------------------------------------------------
-# Source: GitHub Security Advisories (watchlist)
+# Source: GitHub Security Advisories (by ecosystem)
 # ---------------------------------------------------------------------------
 
 def fetch_github_advisories(days=7):
-    log(f"Fetching GitHub Security Advisories ({len(GITHUB_WATCHLIST)} packages)...")
-    cut = cutoff_utc(hours=days * 24)
+    log(f"Fetching GitHub Security Advisories ({len(GITHUB_ECOSYSTEMS)} ecosystems)...")
+    now_dt = datetime.now(timezone.utc)
+    start = (now_dt - timedelta(days=days)).strftime("%Y-%m-%d")
+    end   = now_dt.strftime("%Y-%m-%d")
+    pub_range = f"{start}..{end}"
     SEV_MAP = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
+    gh_headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     seen = set()
     results = []
-    gh_headers = {"Accept": "application/vnd.github+json"}
 
-    for pkg in GITHUB_WATCHLIST:
+    for eco in GITHUB_ECOSYSTEMS:
         url = (
             "https://api.github.com/advisories"
-            f"?affects={pkg}&per_page=100&type=reviewed"
+            f"?ecosystem={eco}&published={pub_range}&type=reviewed&per_page=100"
         )
         raw = http_get(url, headers=gh_headers)
         if not raw:
@@ -103,21 +102,16 @@ def fetch_github_advisories(days=7):
             continue
 
         if not isinstance(items, list):
+            log(f"  GitHub [{eco}]: unexpected response")
             time.sleep(2)
             continue
+
+        log(f"  GitHub [{eco}]: {len(items)} advisories")
 
         for item in items:
             ghsa = item.get("ghsa_id", "")
             if not ghsa or ghsa in seen:
                 continue
-
-            pub = item.get("published_at", "")
-            try:
-                if datetime.fromisoformat(pub.replace("Z", "+00:00")) < cut:
-                    continue
-            except Exception:
-                pass
-
             seen.add(ghsa)
 
             cve_id = item.get("cve_id") or ghsa
@@ -134,14 +128,15 @@ def fetch_github_advisories(days=7):
             for vuln in (item.get("vulnerabilities") or [])[:6]:
                 ep = vuln.get("package") or {}
                 name = ep.get("name", "")
-                eco = ep.get("ecosystem", "")
+                eco2 = ep.get("ecosystem", "")
                 vrange = vuln.get("vulnerable_version_range", "")
                 if name:
-                    label = f"{eco}/{name}" if eco else name
+                    label = f"{eco2}/{name}" if eco2 else name
                     if vrange:
                         label += f" {vrange}"
                     affected.append(label)
 
+            pub = item.get("published_at", "")
             html_url = item.get("html_url") or f"https://github.com/advisories/{ghsa}"
             refs = ([html_url] + [r for r in (item.get("references") or []) if r])[:4]
 
@@ -158,9 +153,9 @@ def fetch_github_advisories(days=7):
                 "url": html_url,
             })
 
-        time.sleep(1.5)  # stay well within 60 req/hour unauthenticated limit
+        time.sleep(2)  # stay within 60 req/hour unauthenticated
 
-    log(f"  GitHub Advisories: {len(results)} advisories")
+    log(f"  GitHub Advisories: {len(results)} total")
     return results
 
 
@@ -506,7 +501,7 @@ def fetch_oss_security(days=7):
 # Source: Kubernetes official CVE feed
 # ---------------------------------------------------------------------------
 
-def fetch_kubernetes(days=7):
+def fetch_kubernetes(days=90):  # CVEs are infrequent; 90-day window catches recent ones
     log("Fetching Kubernetes CVEs...")
     url = "https://kubernetes.io/docs/reference/issues-security/official-cve-feed/index.json"
     raw = http_get(url)
@@ -575,48 +570,50 @@ def fetch_kubernetes(days=7):
 
 def fetch_exploitdb(days=7):
     log("Fetching Exploit-DB...")
-    raw = http_get("https://www.exploit-db.com/rss.xml")
+    # Use their JSON search API — RSS is often blocked by Cloudflare
+    after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    url = (
+        "https://www.exploit-db.com/search"
+        f"?date_from={after}&type=exploits&order_by=date_published&order=desc&draw=1&start=0&length=100"
+    )
+    raw = http_get(url, headers={
+        "Accept": "application/json, text/javascript, */*",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": "https://www.exploit-db.com/",
+    })
     if not raw:
+        log("  Exploit-DB: no response, skipping")
         return []
-
-    cut = cutoff_utc(hours=days * 24)
-    results = []
 
     try:
-        root = ET.fromstring(raw)
-    except ET.ParseError as ex:
-        log(f"  Exploit-DB XML error: {ex}")
+        data = json.loads(raw)
+    except json.JSONDecodeError as ex:
+        log(f"  Exploit-DB JSON error: {ex}")
         return []
 
-    for item in root.iter("item"):
-        title = (item.findtext("title") or "").strip()
-        link  = (item.findtext("link")  or "").strip()
-        desc  = (item.findtext("description") or "").strip()
-        pub   = (item.findtext("pubDate") or "").strip()
+    results = []
+    for item in data.get("data", []):
+        eid   = str(item.get("id", ""))
+        title = strip_html(item.get("description_main") or item.get("description") or "").strip()
+        date  = (item.get("date_published") or item.get("date") or "")[:10]
+        cve   = (item.get("codes") or "").strip()  # may be "CVE-XXXX-YYYY"
+        etype = (item.get("type", {}) or {}).get("name", "") if isinstance(item.get("type"), dict) else ""
+        platform = (item.get("platform", {}) or {}).get("name", "") if isinstance(item.get("platform"), dict) else ""
 
-        try:
-            if parsedate_to_datetime(pub).astimezone(timezone.utc) < cut:
-                continue
-        except Exception:
-            pass
-
-        # Category from title: "[webapps] Title" → "webapps"
-        cat_m = re.match(r"\[([^\]]+)\]\s*(.+)", title)
-        category = cat_m.group(1) if cat_m else ""
-        clean_title = cat_m.group(2) if cat_m else title
-
-        cves = re.findall(r"CVE-\d{4}-\d+", desc + " " + title)
+        cve_ids = re.findall(r"CVE-\d{4}-\d+", cve + " " + title)
+        link = f"https://www.exploit-db.com/exploits/{eid}" if eid else ""
+        pub  = f"{date}T00:00:00Z" if date else ""
 
         results.append({
-            "id": cves[0] if cves else re.search(r"/(\d+)$", link or "").group(1) if link else title[:20],
-            "title": clean_title,
-            "description": f"[{category}] {clean_title}" if category else clean_title,
+            "id": cve_ids[0] if cve_ids else (f"EDB-{eid}" if eid else title[:20]),
+            "title": title[:160],
+            "description": f"[{etype}] [{platform}] {title}".strip("[] ") if (etype or platform) else title,
             "score": None,
             "severity": "HIGH",
             "source": "Exploit-DB",
             "published": pub,
-            "references": [link],
-            "affected": ([category] if category else []) + cves[:3],
+            "references": [link] if link else [],
+            "affected": ([etype] if etype else []) + ([platform] if platform else []) + cve_ids[:2],
             "url": link,
             "badge": "PUBLIC EXPLOIT",
         })
@@ -632,8 +629,9 @@ def fetch_exploitdb(days=7):
 def fetch_redhat(days=7):
     log(f"Fetching Red Hat CVEs (last {days} days)...")
     after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    url = f"https://access.redhat.com/labs/securitydataapi/cve.json?per_page=100&after={after}"
-    raw = http_get(url)
+    # Primary: new API endpoint (old /labs/securitydataapi/ is deprecated)
+    url = f"https://access.redhat.com/hydra/rest/securitydata/cve.json?per_page=100&after={after}"
+    raw = http_get(url, headers={"Accept": "application/json"})
     if not raw:
         return []
 

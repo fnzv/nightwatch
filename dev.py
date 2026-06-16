@@ -19,6 +19,8 @@ from build import (
     write_cve_pages,
     write_sitemap,
     write_robots,
+    write_stats_page,
+    write_vendor_pages,
 )
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
@@ -38,10 +40,12 @@ hist_dates = build_historical_index()
 # Skip news fetch — empty list for dev
 news = []
 
-# Generate CVE pages + sitemap + robots (fast, no network)
+# Generate CVE pages + stats + vendor pages + sitemap + robots (fast, no network)
 print("[dev] Writing CVE pages...")
 cve_pages = write_cve_pages(vulns, date_str)
-write_sitemap(cve_pages, date_str)
+write_stats_page(vulns, date_str)
+vendor_pages = write_vendor_pages(vulns, date_str)
+write_sitemap(cve_pages, date_str, vendor_pages=vendor_pages)
 write_robots()
 
 # Static SEO section
@@ -71,9 +75,14 @@ static_html = (
     "</section>"
 )
 
-json_blob  = json.dumps(vulns, ensure_ascii=False, separators=(",", ":"))
-news_blob  = json.dumps(news,  ensure_ascii=False, separators=(",", ":"))
-dates_blob = json.dumps(hist_dates)
+json_blob    = json.dumps(vulns,      ensure_ascii=False, separators=(",", ":"))
+news_blob    = json.dumps(news,       ensure_ascii=False, separators=(",", ":"))
+dates_blob   = json.dumps(hist_dates)
+source_counts = {}
+for v in vulns:
+    src = v.get("source", "unknown")
+    source_counts[src] = source_counts.get(src, 0) + 1
+health_blob  = json.dumps(source_counts)
 
 html = _HTML
 html = html.replace("__DATE__",            date_str)
@@ -81,6 +90,7 @@ html = html.replace("__COUNT__",           str(len(vulns)))
 html = html.replace("__JSON__",            json_blob)
 html = html.replace("__DATES_JSON__",      dates_blob)
 html = html.replace("__NEWS_JSON__",       news_blob)
+html = html.replace("__HEALTH__",          health_blob)
 html = html.replace("__STATIC_CVE_HTML__", static_html)
 
 with open("index.html", "w", encoding="utf-8") as f:

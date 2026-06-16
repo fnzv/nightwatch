@@ -1137,7 +1137,7 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
     return unique
 
 
-def write_sitemap(cve_pages, date_str, base_url=BASE_URL):
+def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None):
     def url_entry(loc, freq, pri):
         return (
             f"  <url><loc>{loc}</loc>"
@@ -1147,6 +1147,9 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL):
         )
 
     entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
+    entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
+    for vp in (vendor_pages or []):
+        entries.append(url_entry(f"{base_url}/vendor/{vp['slug']}.html", "daily", "0.7"))
     for v in cve_pages:
         entries.append(url_entry(f"{base_url}/cve/{v['id']}.html", "weekly", "0.8"))
 
@@ -1334,8 +1337,29 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #seo-index li a{color:var(--accent);font-family:ui-monospace,monospace;font-size:.7rem;font-weight:600}
 #seo-index small{color:#94a3b8;margin-left:.25rem}
 
+/* Watchlist */
+.card.watched{outline:2px solid #f59e0b;outline-offset:-1px}
+.bwl{background:#f59e0b;color:#1e293b!important}
+#wl-panel{display:none;background:#1c1917;border-bottom:1px solid #292524;padding:.45rem 2rem;align-items:center;gap:.5rem;flex-wrap:wrap}
+#wl-panel.open{display:flex}
+#wl-input{background:#292524;border:1px solid #44403c;border-radius:5px;color:#e7e5e4;
+  font-size:.78rem;padding:.28rem .6rem;outline:none;width:220px}
+#wl-input:focus{border-color:#f59e0b}
+#wl-add{background:#f59e0b;color:#1e293b;border:none;border-radius:5px;padding:.28rem .65rem;
+  font-size:.78rem;font-weight:700;cursor:pointer}
+#wl-add:hover{background:#fbbf24}
+.wl-tag{display:inline-flex;align-items:center;gap:.3rem;background:#292524;border:1px solid #44403c;
+  border-radius:999px;padding:.15rem .55rem;font-size:.72rem;color:#e7e5e4}
+.wl-tag button{background:none;border:none;color:#78716c;cursor:pointer;font-size:.8rem;
+  padding:0 .1rem;line-height:1}
+.wl-tag button:hover{color:#f87171}
+#wl-hits{font-size:.72rem;color:#a8a29e;margin-left:.3rem}
+#wl-only{font-size:.72rem;color:#f59e0b;cursor:pointer;background:none;border:1px solid #f59e0b;
+  border-radius:5px;padding:.2rem .55rem;font-weight:600}
+#wl-only.on{background:#f59e0b;color:#1e293b}
+
 @media(max-width:640px){
-  header,#chart-wrap,.bar,.stats,#grid{padding-left:1rem;padding-right:1rem}
+  header,#chart-wrap,.bar,.stats,#grid,#wl-panel{padding-left:1rem;padding-right:1rem}
   #grid{grid-template-columns:1fr}
 }
 </style>
@@ -1352,12 +1376,21 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub &middot; OSV</div>
     <div style="margin-top:.5rem;display:flex;gap:.4rem;align-items:center;justify-content:flex-end;flex-wrap:wrap">
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
+      <a class="hlink" href="/stats.html">Stats</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
     </div>
   </div>
 </header>
 <div id="hist-banner"></div>
+<div id="wl-panel">
+  <span style="font-size:.72rem;color:#a8a29e;font-weight:600;white-space:nowrap">&#9733; Watchlist keywords:</span>
+  <div id="wl-tags" style="display:flex;flex-wrap:wrap;gap:.3rem"></div>
+  <input id="wl-input" type="text" placeholder="add keyword…" autocomplete="off" spellcheck="false">
+  <button id="wl-add">Add</button>
+  <button id="wl-only">Show only</button>
+  <span id="wl-hits"></span>
+</div>
 
 <div id="chart-wrap">
   <div id="chart-title">Vulnerabilities — last 14 days</div>
@@ -1399,6 +1432,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <button class="pill" data-range="1Y">Last year</button>
     <div class="sep"></div>
     <button class="pill" id="newPill">New since yesterday</button>
+    <button class="pill" id="wlPill">&#9733;&nbsp;Watchlist</button>
     <div class="sep"></div>
     <span class="plabel">Sort:</span>
     <button class="pill" data-sort="SEVERITY">Severity</button>
@@ -1535,6 +1569,11 @@ function copyLink(btn,path){
   }).catch(()=>prompt("Copy link:",url));
 }
 
+function isWatched(v){
+  if(!watchlist.length)return false;
+  const hay=[v.id,v.title,v.description,...(v.affected||[])].join(" ").toLowerCase();
+  return watchlist.some(kw=>hay.includes(kw));
+}
 function card(v){
   const sc=v.score!=null?`<span class="b bsc">${v.score.toFixed(1)}</span>`:"";
   const sv=`<span class="b b${SEV(v)}">${SEV(v)}</span>`;
@@ -1542,6 +1581,7 @@ function card(v){
   const xp=v.badge?`<span class="b bxpl">${esc(v.badge)}</span>`:"";
   const ep=v.epss!=null?`<span class="b bepss" title="EPSS score: ${(v.epss*100).toFixed(2)}% probability of exploitation">EPSS ${v.epss_pct}%ile</span>`:"";
   const nw=v._new?`<span class="b bnew">NEW</span>`:"";
+  const wl=isWatched(v)?`<span class="b bwl">&#9733;</span>`:"";
   const aff=(v.affected||[]).slice(0,6).map(a=>`<span class="chip">${esc(a)}</span>`).join("");
   const rfs=(v.references||[]).filter(Boolean).slice(0,3).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`).join(" &middot; ");
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
@@ -1549,7 +1589,8 @@ function card(v){
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
   const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
-  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${nw}${sc}${sv}${sr}${ep}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  const watchedCls=isWatched(v)?" watched":"";
+  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${nw}${sc}${sv}${sr}${ep}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){
@@ -1604,7 +1645,44 @@ function priority(v){
 
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};
 const SEV_ORDER={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4};
-let aSev="ALL",aSrc="ALL",aRange="24H",aSort="DATE",aNew=false,q="";
+let aSev="ALL",aSrc="ALL",aRange="24H",aSort="DATE",aNew=false,aWlOnly=false,q="";
+
+// --- Watchlist ---
+let watchlist=JSON.parse(localStorage.getItem("vf_watchlist")||"[]");
+function saveWl(){localStorage.setItem("vf_watchlist",JSON.stringify(watchlist));}
+function renderWlTags(){
+  const ct=document.getElementById("wl-tags");
+  ct.innerHTML=watchlist.map((kw,i)=>
+    `<span class="wl-tag">${esc(kw)}<button onclick="removeWl(${i})" title="Remove">&#10005;</button></span>`
+  ).join("");
+  updateWlHits();
+}
+function updateWlHits(){
+  const hits=watchlist.length?D.filter(isWatched).length:0;
+  document.getElementById("wl-hits").textContent=watchlist.length?`${hits} match${hits!==1?"es":""}${aWlOnly?" (filtered)":""}` :"";
+}
+function removeWl(i){watchlist.splice(i,1);saveWl();renderWlTags();applyFilters();}
+const wlOnlyBtn=document.getElementById("wl-only");
+const wlPanel=document.getElementById("wl-panel");
+const wlPill=document.getElementById("wlPill");
+wlPill.addEventListener("click",()=>{
+  const open=wlPanel.classList.toggle("open");
+  wlPill.classList.toggle("on",open);
+  if(open)document.getElementById("wl-input").focus();
+});
+document.getElementById("wl-add").addEventListener("click",()=>{
+  const inp=document.getElementById("wl-input");
+  const kw=inp.value.trim().toLowerCase();
+  if(kw&&!watchlist.includes(kw)){watchlist.push(kw);saveWl();renderWlTags();applyFilters();}
+  inp.value="";inp.focus();
+});
+document.getElementById("wl-input").addEventListener("keydown",ev=>{
+  if(ev.key==="Enter"){document.getElementById("wl-add").click();}
+});
+wlOnlyBtn.addEventListener("click",()=>{
+  aWlOnly=!aWlOnly;wlOnlyBtn.classList.toggle("on",aWlOnly);applyFilters();
+});
+renderWlTags();
 
 // --- Source health dots ---
 document.querySelectorAll('.pill[data-src]').forEach(b=>{
@@ -1658,6 +1736,7 @@ function applyFilters(){
   const now2=Date.now(),maxAge=RANGES[aRange];
   visData=D.filter(v=>{
     if(aNew&&!v._new)return false;
+    if(aWlOnly&&!isWatched(v))return false;
     if(aSev!=="ALL"&&SEV(v)!==aSev)return false;
     if(aSrc!=="ALL"&&v.source!==aSrc)return false;
     if(maxAge!==Infinity&&(now2-(v._ts||0))>maxAge)return false;
@@ -1667,6 +1746,7 @@ function applyFilters(){
     }
     return true;
   });
+  updateWlHits();
   visData.sort((a,b)=>{
     const pd=priority(b)-priority(a);if(pd!==0)return pd;
     if(aSort==="DATE")return(b._ts||0)-(a._ts||0);
@@ -2177,6 +2257,370 @@ def load_historical(days=30):
 
 
 # ---------------------------------------------------------------------------
+# Stats page
+# ---------------------------------------------------------------------------
+
+_STATS_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>vulnfeed stats &mdash; __DATE__</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+.wrap{max-width:1100px;margin:0 auto;padding:2rem}
+h2{font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1rem}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2.5rem}
+.stat-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.2rem 1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.stat-val{font-size:2rem;font-weight:800;letter-spacing:-.04em}
+.stat-lbl{font-size:.75rem;color:var(--muted);margin-top:.15rem}
+.crit-val{color:var(--crit)}.high-val{color:var(--high)}.epss-val{color:#0d9488}
+.section{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.hbar-row{display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem}
+.hbar-label{width:110px;font-size:.78rem;font-weight:600;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar-track{flex:1;background:#f1f5f9;border-radius:4px;height:18px;overflow:hidden}
+.hbar-fill{height:100%;border-radius:4px;transition:width .3s}
+.hbar-count{font-size:.74rem;color:var(--muted);min-width:40px;text-align:right}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.4rem .6rem;border-bottom:2px solid var(--border)}
+td{padding:.45rem .6rem;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+.sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
+.sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+@media(max-width:640px){.wrap{padding:1rem}.hbar-label{width:80px}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em> &mdash; Stats</div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <span style="font-size:.72rem;color:#475569">__DATE__</span>
+  </div>
+</header>
+<div class="wrap">
+
+<div class="stat-grid">
+  <div class="stat-box"><div class="stat-val">__TOTAL__</div><div class="stat-lbl">Total vulnerabilities (30 days)</div></div>
+  <div class="stat-box"><div class="stat-val crit-val">__N_CRIT__</div><div class="stat-lbl">Critical severity</div></div>
+  <div class="stat-box"><div class="stat-val high-val">__N_EXPL__</div><div class="stat-lbl">Actively exploited (CISA KEV)</div></div>
+  <div class="stat-box"><div class="stat-val epss-val">__N_EPSS__</div><div class="stat-lbl">High EPSS (&gt;50th %ile)</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem">
+
+<div class="section">
+  <h2>By severity</h2>
+  __SEV_BARS__
+</div>
+
+<div class="section">
+  <h2>By source</h2>
+  __SRC_BARS__
+</div>
+
+</div>
+
+<div class="section">
+  <h2>CVSS score distribution</h2>
+  __CVSS_BARS__
+</div>
+
+<div class="section">
+  <h2>Top affected products / packages</h2>
+  <table>
+    <tr><th>Product</th><th style="text-align:right">CVEs</th><th style="text-align:right">Max CVSS</th><th>Worst severity</th></tr>
+    __TOP_PRODUCTS__
+  </table>
+</div>
+
+<div class="section">
+  <h2>Highest EPSS scores (top 20)</h2>
+  <table>
+    <tr><th>CVE ID</th><th>Title</th><th style="text-align:right">EPSS %ile</th><th style="text-align:right">CVSS</th><th>Severity</th></tr>
+    __TOP_EPSS__
+  </table>
+</div>
+
+</div>
+</body>
+</html>
+"""
+
+
+def _hbar(label, count, max_count, color):
+    pct = int(count / max_count * 100) if max_count else 0
+    lbl_esc = _xe(str(label))
+    return (
+        f'<div class="hbar-row">'
+        f'<div class="hbar-label" title="{lbl_esc}">{lbl_esc}</div>'
+        f'<div class="hbar-track"><div class="hbar-fill" style="width:{pct}%;background:{color}"></div></div>'
+        f'<div class="hbar-count">{count:,}</div>'
+        f'</div>'
+    )
+
+
+def write_stats_page(vulns, date_str, base_url=BASE_URL):
+    sev_colors = {"CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#d97706", "LOW": "#16a34a", "UNKNOWN": "#6b7280"}
+    src_color = "#334155"
+
+    sev_counts = {}
+    src_counts = {}
+    cvss_bins = [0] * 20   # 0.0-0.5, 0.5-1.0, …, 9.5-10.0
+    product_map = {}        # product -> {count, max_cvss, worst_sev}
+    epss_high = 0
+    exploited = 0
+
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+
+    for v in vulns:
+        sev = v.get("severity", "UNKNOWN")
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+        src_counts[v.get("source", "?")] = src_counts.get(v.get("source", "?"), 0) + 1
+        if v.get("badge") == "ACTIVELY EXPLOITED":
+            exploited += 1
+        if v.get("epss_pct") and v["epss_pct"] >= 50:
+            epss_high += 1
+        sc = v.get("score")
+        if sc is not None:
+            bin_i = min(int(sc / 0.5), 19)
+            cvss_bins[bin_i] += 1
+        for prod in (v.get("affected") or []):
+            prod = prod.split(" ")[0][:40]
+            if prod not in product_map:
+                product_map[prod] = {"count": 0, "max_cvss": None, "worst_sev": "UNKNOWN"}
+            product_map[prod]["count"] += 1
+            if sc and (product_map[prod]["max_cvss"] is None or sc > product_map[prod]["max_cvss"]):
+                product_map[prod]["max_cvss"] = sc
+            if SEV_ORDER.get(sev, 4) < SEV_ORDER.get(product_map[prod]["worst_sev"], 4):
+                product_map[prod]["worst_sev"] = sev
+
+    # severity bars
+    sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+    max_sev = max((sev_counts.get(s, 0) for s in sev_order), default=1)
+    sev_bars = "".join(_hbar(s, sev_counts.get(s, 0), max_sev, sev_colors[s]) for s in sev_order)
+
+    # source bars
+    sorted_src = sorted(src_counts.items(), key=lambda x: -x[1])
+    max_src = sorted_src[0][1] if sorted_src else 1
+    src_bars = "".join(_hbar(s, c, max_src, src_color) for s, c in sorted_src)
+
+    # CVSS bars
+    max_cvss_bin = max(cvss_bins) if any(cvss_bins) else 1
+    cvss_bars = "".join(
+        _hbar(f"{i*0.5:.1f}–{i*0.5+0.5:.1f}", cvss_bins[i], max_cvss_bin, "#2563eb")
+        for i in range(len(cvss_bins))
+    )
+
+    # top products
+    top_prods = sorted(product_map.items(), key=lambda x: -x[1]["count"])[:30]
+    rows = []
+    for prod, info in top_prods:
+        sc_str = f'{info["max_cvss"]:.1f}' if info["max_cvss"] else "—"
+        sev = info["worst_sev"]
+        rows.append(
+            f'<tr><td style="font-family:ui-monospace,monospace;font-size:.75rem">{_xe(prod)}</td>'
+            f'<td style="text-align:right">{info["count"]}</td>'
+            f'<td style="text-align:right">{sc_str}</td>'
+            f'<td><span class="sev s{sev}">{sev}</span></td></tr>'
+        )
+    top_products_html = "".join(rows)
+
+    # top EPSS
+    epss_vulns = sorted(
+        [v for v in vulns if v.get("epss_pct") is not None],
+        key=lambda v: -(v["epss_pct"] or 0),
+    )[:20]
+    epss_rows = []
+    for v in epss_vulns:
+        sev = v.get("severity", "UNKNOWN")
+        sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+        ttl = _xe((v.get("title") or v["id"])[:80])
+        url = _xe(v.get("url", ""))
+        epss_rows.append(
+            f'<tr><td><a href="{url}" target="_blank" rel="noopener" style="font-family:ui-monospace,monospace;font-size:.75rem;color:#2563eb">{_xe(v["id"])}</a></td>'
+            f'<td style="font-size:.75rem">{ttl}</td>'
+            f'<td style="text-align:right">{v["epss_pct"]:.1f}%</td>'
+            f'<td style="text-align:right">{sc_str}</td>'
+            f'<td><span class="sev s{sev}">{sev}</span></td></tr>'
+        )
+    top_epss_html = "".join(epss_rows)
+
+    html = _STATS_HTML
+    html = html.replace("__DATE__", date_str)
+    html = html.replace("__TOTAL__", f"{len(vulns):,}")
+    html = html.replace("__N_CRIT__", str(sev_counts.get("CRITICAL", 0)))
+    html = html.replace("__N_EXPL__", str(exploited))
+    html = html.replace("__N_EPSS__", str(epss_high))
+    html = html.replace("__SEV_BARS__", sev_bars)
+    html = html.replace("__SRC_BARS__", src_bars)
+    html = html.replace("__CVSS_BARS__", cvss_bars)
+    html = html.replace("__TOP_PRODUCTS__", top_products_html)
+    html = html.replace("__TOP_EPSS__", top_epss_html)
+
+    with open("stats.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log("  Written: stats.html")
+
+
+# ---------------------------------------------------------------------------
+# Vendor pages
+# ---------------------------------------------------------------------------
+
+VENDOR_PAGES = [
+    # (slug, display_name, search_keyword)
+    ("kubernetes",   "Kubernetes",       "kubernetes"),
+    ("nginx",        "nginx",             "nginx"),
+    ("openssl",      "OpenSSL",           "openssl"),
+    ("openssh",      "OpenSSH",           "openssh"),
+    ("linux-kernel", "Linux Kernel",      "linux kernel"),
+    ("docker",       "Docker",            "docker"),
+    ("openstack",    "OpenStack",         "openstack"),
+    ("apache",       "Apache HTTP",       "apache httpd"),
+    ("redis",        "Redis",             "redis"),
+    ("postgresql",   "PostgreSQL",        "postgresql"),
+    ("django",       "Django",            "django"),
+    ("flask",        "Flask",             "flask"),
+    ("log4j",        "Log4j",             "log4j"),
+    ("spring",       "Spring Framework",  "spring"),
+    ("grafana",      "Grafana",           "grafana"),
+    ("vault",        "HashiCorp Vault",   "vault"),
+    ("traefik",      "Traefik",           "traefik"),
+    ("cilium",       "Cilium",            "cilium"),
+    ("containerd",   "containerd",        "containerd"),
+    ("curl",         "curl",              "curl"),
+    ("ansible",      "Ansible",           "ansible"),
+    ("jenkins",      "Jenkins",           "jenkins"),
+    ("gitlab",       "GitLab",            "gitlab"),
+]
+
+_VENDOR_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>__VENDOR__ vulnerabilities &mdash; vulnfeed</title>
+<meta name="description" content="__COUNT__ recent vulnerabilities for __VENDOR__ aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat and more.">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+.wrap{max-width:1100px;margin:0 auto;padding:2rem}
+h1{font-size:1.35rem;font-weight:800;margin-bottom:.25rem}
+.sub{font-size:.8rem;color:var(--muted);margin-bottom:1.75rem}
+.sub a{color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:#f8fafc}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+.cve-id{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.cve-id:hover{text-decoration:underline}
+.sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
+.sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+.src-tag{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}
+.epss-tag{display:inline-block;background:#0d9488;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}
+.ttl{font-size:.78rem;color:var(--text)}
+.empty{text-align:center;padding:4rem 2rem;color:var(--muted)}
+@media(max-width:640px){.wrap{padding:1rem}th:nth-child(4),td:nth-child(4),th:nth-child(6),td:nth-child(6){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <a class="hlink" href="/#q=__KEYWORD__">Search feed</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1>__VENDOR__ vulnerabilities</h1>
+  <p class="sub">__COUNT__ entries matching <code>__KEYWORD__</code> &mdash; updated __DATE__ &middot; <a href="/">vulnfeed</a></p>
+  __TABLE__
+</div>
+</body>
+</html>
+"""
+
+
+def write_vendor_pages(vulns, date_str, base_url=BASE_URL):
+    os.makedirs("vendor", exist_ok=True)
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    pages = []
+
+    for slug, display_name, keyword in VENDOR_PAGES:
+        kw = keyword.lower()
+        matched = [
+            v for v in vulns
+            if kw in " ".join([v.get("id", ""), v.get("title", ""), v.get("description", ""),
+                                *v.get("affected", [])]).lower()
+        ]
+        matched.sort(key=lambda v: (
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
+            -(v.get("score") or 0),
+        ))
+
+        if not matched:
+            continue
+
+        rows = []
+        for v in matched:
+            sev = v.get("severity", "UNKNOWN")
+            cve_url = v.get("url", "")
+            sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+            epss_str = f'{v["epss_pct"]:.0f}%ile' if v.get("epss_pct") is not None else "—"
+            pub = (v.get("published") or "")[:10]
+            ttl = _xe((v.get("title") or v["id"])[:120])
+            rows.append(
+                f'<tr>'
+                f'<td><a class="cve-id" href="{_xe(cve_url)}" target="_blank" rel="noopener">{_xe(v["id"])}</a></td>'
+                f'<td class="ttl">{ttl}</td>'
+                f'<td><span class="sev s{sev}">{sev}</span></td>'
+                f'<td>{sc_str}</td>'
+                f'<td>{epss_str}</td>'
+                f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+                f'<td>{pub}</td>'
+                f'</tr>'
+            )
+
+        table_html = (
+            '<table>'
+            '<tr><th>CVE / ID</th><th>Title</th><th>Severity</th><th>CVSS</th><th>EPSS</th><th>Source</th><th>Date</th></tr>'
+            + "".join(rows) +
+            '</table>'
+        ) if rows else '<div class="empty">No matching vulnerabilities found.</div>'
+
+        html = _VENDOR_HTML
+        html = html.replace("__VENDOR__", _xe(display_name))
+        html = html.replace("__KEYWORD__", _xe(keyword))
+        html = html.replace("__COUNT__", str(len(matched)))
+        html = html.replace("__DATE__", date_str)
+        html = html.replace("__TABLE__", table_html)
+
+        path = os.path.join("vendor", f"{slug}.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        pages.append({"slug": slug, "display_name": display_name, "count": len(matched)})
+
+    log(f"  Written: {len(pages)} vendor pages → vendor/")
+    return pages
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2265,10 +2709,14 @@ def main():
     write_rss(vulns)
     write_robots()
 
-    # --- CVE pages + sitemap ---
+    # --- CVE pages + stats + vendor pages + sitemap ---
     log("Writing CVE pages...")
     cve_pages = write_cve_pages(vulns, date_str)
-    write_sitemap(cve_pages, date_str)
+    log("Writing stats page...")
+    write_stats_page(vulns, date_str)
+    log("Writing vendor pages...")
+    vendor_pages = write_vendor_pages(vulns, date_str)
+    write_sitemap(cve_pages, date_str, vendor_pages=vendor_pages)
 
     # --- Static HTML for SEO pre-render ---
     critical_ids = {v["id"] for v in cve_pages}

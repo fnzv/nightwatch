@@ -688,7 +688,9 @@ def fetch_redhat(days=7):
                     pass
 
         pub = item.get("public_date", "")
-        bugzilla = item.get("bugzilla", {}) or {}
+        bugzilla = item.get("bugzilla") or {}
+        if not isinstance(bugzilla, dict):
+            bugzilla = {}
         desc = bugzilla.get("description", "")
 
         # Affected packages from advisories

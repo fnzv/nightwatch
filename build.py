@@ -1488,10 +1488,44 @@ function newsItem(n){
   return `<div class="news-item"><div class="news-row">${src}<a class="news-title" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="news-meta">${meta}</div></div>${desc}</div>`;
 }
 
-const PRIORITY=["kubernetes","k8s","nginx","openstack","traefik","apache httpd","apache2","openssh","docker","containerd","linux kernel","glibc","openssl","log4j","gitlab","jenkins","grafana","prometheus","istio","vault","terraform"];
+// Tier 2 — core OS/runtime: compromise = everything below it is suspect
+const BOOST2=[
+  "linux kernel","glibc","openssl","openssh","sudo","polkit","systemd","dbus",
+  "kerberos","bind9","ntp ","gnutls","nss ","libssl","pam ","libc "
+];
+// Tier 1 — widely-deployed infrastructure
+const BOOST1=[
+  "kubernetes","k8s","nginx","apache httpd","apache2","httpd","docker",
+  "containerd","runc","openstack","traefik","envoy","istio","etcd","cilium",
+  "helm","redis","postgresql","mysql","mariadb","mongodb","elasticsearch",
+  "kafka","rabbitmq","grafana","prometheus","alertmanager","loki",
+  "vault","terraform","ansible","jenkins","gitlab","github enterprise",
+  "log4j","log4shell","spring framework","spring boot","openshift",
+  "rancher","harbor","argo","flux","trivy","falco","curl","python",
+  "ruby on rails","node.js","django","flask","express"
+];
+// Tier -1 — real CVEs but low signal for infrastructure teams
+const DEMOTE=[
+  // WordPress ecosystem plugins (not WP core itself)
+  "woocommerce","elementor","wpforms","contact form 7","yoast","w3 total cache",
+  "wordfence","ninja forms","gravity forms","wpdiscuz","litespeed cache",
+  "all in one seo","wp statistics","wp super cache","jetpack","akismet",
+  "wp-file-manager","advanced custom fields","forminator",
+  // CMS extensions
+  "joomla extension","joomla plugin","joomla component",
+  "drupal module","magento extension","prestashop module",
+  // Intentionally-vulnerable training apps
+  "multijuicer","juiceshop","juice shop","dvwa","webgoat","bodgeit",
+  // Niche consumer software unlikely to be in server infrastructure
+  "itunes","winamp","vlc media"
+];
+
 function priority(v){
   const hay=[v.id,v.title,v.description,...(v.affected||[])].join(" ").toLowerCase();
-  return PRIORITY.some(t=>hay.includes(t))?1:0;
+  if(DEMOTE.some(t=>hay.includes(t)))return -1;
+  if(BOOST2.some(t=>hay.includes(t)))return 2;
+  if(BOOST1.some(t=>hay.includes(t)))return 1;
+  return 0;
 }
 
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};

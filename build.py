@@ -8,6 +8,7 @@ Output: index.html
 Serve:  python3 -m http.server 8080
 """
 
+import gzip
 import json
 import os
 import re
@@ -1249,6 +1250,10 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .bsrc{background:#334155;font-size:.62rem}
 .bxpl{background:#7c3aed}
 .bsc{background:#1e293b;font-family:ui-monospace,monospace}
+.bepss{background:#0d9488;font-size:.62rem}
+.bnew{background:#059669;animation:npulse 2s ease-in-out infinite}
+@keyframes npulse{0%,100%{opacity:1}50%{opacity:.6}}
+.src-dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-left:3px;vertical-align:middle;flex-shrink:0}
 
 .ctitle{font-size:.85rem;font-weight:600;line-height:1.4}
 .cdesc{font-size:.78rem;color:var(--muted);line-height:1.55;
@@ -1376,10 +1381,13 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <button class="pill" data-range="30D">Last 30 days</button>
     <button class="pill" data-range="1Y">Last year</button>
     <div class="sep"></div>
+    <button class="pill" id="newPill">New since yesterday</button>
+    <div class="sep"></div>
     <span class="plabel">Sort:</span>
     <button class="pill" data-sort="SEVERITY">Severity</button>
     <button class="pill on" data-sort="DATE">Newest first</button>
     <button class="pill" data-sort="SCORE">Score</button>
+    <button class="pill" data-sort="EPSS">EPSS</button>
   </div>
 </div>
 
@@ -1401,6 +1409,7 @@ let D=__JSON__;
 const D_TODAY=D;
 const DATES=__DATES_JSON__;
 const NEWS=__NEWS_JSON__;
+const HEALTH=__HEALTH__;
 
 D.forEach(v=>{v._ts=v.published?new Date(v.published).getTime()||0:0});
 NEWS.forEach(n=>{n._ts=n.published?new Date(n.published).getTime()||0:0});
@@ -1514,6 +1523,8 @@ function card(v){
   const sv=`<span class="b b${SEV(v)}">${SEV(v)}</span>`;
   const sr=`<span class="b bsrc">${esc(v.source)}</span>`;
   const xp=v.badge?`<span class="b bxpl">${esc(v.badge)}</span>`:"";
+  const ep=v.epss!=null?`<span class="b bepss" title="EPSS score: ${(v.epss*100).toFixed(2)}% probability of exploitation">EPSS ${v.epss_pct}%ile</span>`:"";
+  const nw=v._new?`<span class="b bnew">NEW</span>`:"";
   const aff=(v.affected||[]).slice(0,6).map(a=>`<span class="chip">${esc(a)}</span>`).join("");
   const rfs=(v.references||[]).filter(Boolean).slice(0,3).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`).join(" &middot; ");
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
@@ -1521,7 +1532,7 @@ function card(v){
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
   const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
-  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${sc}${sv}${sr}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${nw}${sc}${sv}${sr}${ep}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){
@@ -1576,7 +1587,19 @@ function priority(v){
 
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};
 const SEV_ORDER={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4};
-let aSev="ALL",aSrc="ALL",aRange="24H",aSort="DATE",q="";
+let aSev="ALL",aSrc="ALL",aRange="24H",aSort="DATE",aNew=false,q="";
+
+// --- Source health dots ---
+document.querySelectorAll('.pill[data-src]').forEach(b=>{
+  const src=b.dataset.src;
+  if(src==="ALL")return;
+  const count=HEALTH[src]||0;
+  const dot=document.createElement("span");
+  dot.className="src-dot";
+  dot.style.background=count>0?"#22c55e":"#ef4444";
+  dot.title=count>0?`${count} entries this run`:"No data this run";
+  b.appendChild(dot);
+});
 
 const grid=document.getElementById("grid");
 const emptyEl=document.getElementById("empty");
@@ -1592,6 +1615,7 @@ function pushHash(){
   const p=new URLSearchParams();
   if(q)p.set("q",q);if(aSev!=="ALL")p.set("sev",aSev);if(aSrc!=="ALL")p.set("src",aSrc);
   if(aRange!=="24H")p.set("range",aRange);if(aSort!=="DATE")p.set("sort",aSort);
+  if(aNew)p.set("new","1");
   const s=p.toString();history.replaceState(null,"",s?"#"+s:"#");
 }
 function applyHash(){
@@ -1599,7 +1623,9 @@ function applyHash(){
   const p=new URLSearchParams(h);
   q=p.get("q")||"";aSev=p.get("sev")||"ALL";aSrc=p.get("src")||"ALL";
   aRange=p.get("range")||"24H";aSort=p.get("sort")||"DATE";
+  aNew=p.get("new")==="1";
   document.getElementById("search").value=q;
+  document.getElementById("newPill").classList.toggle("on",aNew);
   ["data-sev","data-src","data-range","data-sort"].forEach(attr=>{
     const key=attr.replace("data-","");
     const val={sev:aSev,src:aSrc,range:aRange,sort:aSort}[key];
@@ -1614,6 +1640,7 @@ const BATCH=60;
 function applyFilters(){
   const now2=Date.now(),maxAge=RANGES[aRange];
   visData=D.filter(v=>{
+    if(aNew&&!v._new)return false;
     if(aSev!=="ALL"&&SEV(v)!==aSev)return false;
     if(aSrc!=="ALL"&&v.source!==aSrc)return false;
     if(maxAge!==Infinity&&(now2-(v._ts||0))>maxAge)return false;
@@ -1627,6 +1654,7 @@ function applyFilters(){
     const pd=priority(b)-priority(a);if(pd!==0)return pd;
     if(aSort==="DATE")return(b._ts||0)-(a._ts||0);
     if(aSort==="SCORE")return(b.score||0)-(a.score||0);
+    if(aSort==="EPSS")return(b.epss||0)-(a.epss||0);
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
   visEl.textContent=visData.length;
@@ -1665,6 +1693,10 @@ function bindPills(attr,setter){
 }
 bindPills("data-sev",v=>aSev=v);bindPills("data-src",v=>aSrc=v);
 bindPills("data-range",v=>aRange=v);bindPills("data-sort",v=>aSort=v);
+
+// New-since-yesterday toggle
+const newPill=document.getElementById("newPill");
+newPill.addEventListener("click",()=>{aNew=!aNew;newPill.classList.toggle("on",aNew);applyFilters();});
 
 // --- Search ---
 let t;
@@ -1927,6 +1959,37 @@ def build_historical_index():
 
 
 # ---------------------------------------------------------------------------
+# Source: EPSS (Exploit Prediction Scoring System)
+# ---------------------------------------------------------------------------
+
+def fetch_epss():
+    log("Fetching EPSS scores (full dataset)...")
+    raw = http_get("https://epss.cyentia.com/epss_scores-current.csv.gz", timeout=90)
+    if not raw:
+        return {}
+    try:
+        text = gzip.decompress(raw).decode("utf-8", errors="replace")
+    except Exception as ex:
+        log(f"  EPSS decompress error: {ex}")
+        return {}
+    scores = {}
+    for line in text.splitlines():
+        if line.startswith("#") or line.startswith("cve,"):
+            continue
+        parts = line.split(",")
+        if len(parts) >= 3 and parts[0].startswith("CVE-"):
+            try:
+                scores[parts[0]] = {
+                    "epss": float(parts[1]),
+                    "percentile": float(parts[2]),
+                }
+            except ValueError:
+                pass
+    log(f"  EPSS: {len(scores)} scores loaded")
+    return scores
+
+
+# ---------------------------------------------------------------------------
 # Historical persistence
 # ---------------------------------------------------------------------------
 
@@ -2001,6 +2064,43 @@ def main():
     vulns = merge(fresh + historical)
     log(f"After dedup/merge: {len(vulns)}")
 
+    # --- Diff vs yesterday ---
+    yesterday_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday_path = os.path.join(HISTORICAL_DIR, f"{yesterday_str}.json")
+    yesterday_ids = set()
+    if os.path.exists(yesterday_path):
+        try:
+            with open(yesterday_path, encoding="utf-8") as f:
+                yesterday_ids = {v["id"] for v in json.load(f)}
+            log(f"Yesterday snapshot: {len(yesterday_ids)} IDs")
+        except Exception as ex:
+            log(f"  Error loading yesterday: {ex}")
+
+    fresh_ids = {v["id"] for v in fresh}
+    for v in vulns:
+        if v["id"] in fresh_ids and v["id"] not in yesterday_ids:
+            v["_new"] = True
+    new_count = sum(1 for v in vulns if v.get("_new"))
+    log(f"New since yesterday: {new_count}")
+
+    # --- EPSS annotation ---
+    log("Annotating EPSS scores...")
+    epss_data = fetch_epss()
+    epss_hits = 0
+    for v in vulns:
+        ep = epss_data.get(v["id"])
+        if ep:
+            v["epss"] = round(ep["epss"], 4)
+            v["epss_pct"] = round(ep["percentile"] * 100, 1)
+            epss_hits += 1
+    log(f"  EPSS annotations: {epss_hits}/{len(vulns)}")
+
+    # --- Source health (per-source counts from fresh fetch) ---
+    source_counts = {}
+    for v in fresh:
+        src = v.get("source", "unknown")
+        source_counts[src] = source_counts.get(src, 0) + 1
+
     # --- News ---
     news = fetch_news(days=3)
 
@@ -2042,9 +2142,10 @@ def main():
         "</section>"
     )
 
-    json_blob  = json.dumps(vulns,     ensure_ascii=False, separators=(",", ":"))
-    news_blob  = json.dumps(news,      ensure_ascii=False, separators=(",", ":"))
-    dates_blob = json.dumps(hist_dates)
+    json_blob     = json.dumps(vulns,         ensure_ascii=False, separators=(",", ":"))
+    news_blob     = json.dumps(news,          ensure_ascii=False, separators=(",", ":"))
+    dates_blob    = json.dumps(hist_dates)
+    health_blob   = json.dumps(source_counts)
 
     html = _HTML
     html = html.replace("__DATE__",            date_str)
@@ -2052,6 +2153,7 @@ def main():
     html = html.replace("__JSON__",            json_blob)
     html = html.replace("__DATES_JSON__",      dates_blob)
     html = html.replace("__NEWS_JSON__",       news_blob)
+    html = html.replace("__HEALTH__",          health_blob)
     html = html.replace("__STATIC_CVE_HTML__", static_html)
 
     out = "index.html"

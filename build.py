@@ -1540,13 +1540,12 @@ updateSevBrk();
       else if(i===0||s.vals[i-1]===0){line+=`M${x.toFixed(1)},${y} `;}
       else{line+=`L${x.toFixed(1)},${y} `;}
     });
-    // Only draw dots for non-zero days
-    const dots=xs.map((x,i)=>{
+    // Tooltip-only markers — use a 1x1 transparent rect so circles don't stretch with preserveAspectRatio=none
+    const tips=xs.map((x,i)=>{
       if(s.vals[i]===0)return"";
-      const t=i===DAYS-1;
-      return `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${t?3.5:2}" fill="${s.color}" fill-opacity="${t?1:.65}"><title>${labels[i]}: ${s.vals[i]} ${s.label}</title></circle>`;
+      return `<rect x="${(x-4).toFixed(1)}" y="${(ys[i]-4).toFixed(1)}" width="8" height="8" fill="transparent"><title>${labels[i]}: ${s.vals[i]} ${s.label}</title></rect>`;
     }).join("");
-    paths+=`<path d="${line}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+    paths+=`<path d="${line}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>${tips}`;
   });
 
   const legend=SERIES.map(s=>

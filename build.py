@@ -1532,20 +1532,17 @@ updateSevBrk();
   let paths="";
   SERIES.forEach(s=>{
     const ys=s.vals.map(n=>PAD+(1-n/maxV)*(VH-PAD*2));
-    // Use M (moveto) for zero-count days so lines don't connect through them
-    let line="";
+    // Skip zero days entirely — never emit M at bottom; just break the line segment
+    let line="",inSeg=false;
     xs.forEach((x,i)=>{
+      if(s.vals[i]===0){inSeg=false;return;}
       const y=ys[i].toFixed(1);
-      if(s.vals[i]===0){line+=`M${x.toFixed(1)},${y} `;}
-      else if(i===0||s.vals[i-1]===0){line+=`M${x.toFixed(1)},${y} `;}
+      if(!inSeg){line+=`M${x.toFixed(1)},${y} `;inSeg=true;}
       else{line+=`L${x.toFixed(1)},${y} `;}
     });
-    // Tooltip-only markers — use a 1x1 transparent rect so circles don't stretch with preserveAspectRatio=none
-    const tips=xs.map((x,i)=>{
-      if(s.vals[i]===0)return"";
-      return `<rect x="${(x-4).toFixed(1)}" y="${(ys[i]-4).toFixed(1)}" width="8" height="8" fill="transparent"><title>${labels[i]}: ${s.vals[i]} ${s.label}</title></rect>`;
-    }).join("");
-    paths+=`<path d="${line}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>${tips}`;
+    if(!line)return;
+    // style="fill:none" as inline CSS overrides any SVG presentation-attribute specificity
+    paths+=`<path d="${line.trim()}" style="fill:none" stroke="${s.color}" stroke-width="1.8" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>`;
   });
 
   const legend=SERIES.map(s=>
@@ -1554,7 +1551,7 @@ updateSevBrk();
   ).join("");
 
   document.getElementById("chart").innerHTML=
-    `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`+
+    `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" style="fill:none;overflow:visible" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`+
     '<div class="chart-lbl-row">'+labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#94a3b8;font-weight:600":""}">${l}</span>`).join("")+'</div>'+
     `<div style="display:flex;gap:.85rem;margin-top:.3rem;padding-left:${PAD}px">${legend}</div>`;
 })();

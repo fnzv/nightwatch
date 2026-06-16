@@ -1450,6 +1450,8 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   <div style="display:flex;gap:.35rem;align-items:center">
     <button class="view-btn on" data-view="vulns">Vulnerabilities</button>
     <button class="view-btn" data-view="news">Security News <span id="news-badge">0</span></button>
+    <div class="sep"></div>
+    <button class="view-btn" id="csvBtn" title="Download visible results as CSV">&#8595;&nbsp;CSV</button>
   </div>
 </div>
 
@@ -1871,6 +1873,22 @@ function setView(view){
   if(isNews)renderNews();
 }
 document.querySelectorAll(".view-btn[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
+
+// --- Export CSV ---
+function csvCell(v){return'"'+String(v==null?"":v).replace(/"/g,'""')+'"';}
+document.getElementById("csvBtn").addEventListener("click",()=>{
+  const cols=["id","severity","score","epss_pct","source","published","badge","title","url"];
+  const headers=["CVE ID","Severity","CVSS","EPSS %ile","Source","Published","Badge","Title","URL"];
+  const rows=[headers.map(csvCell).join(",")];
+  visData.forEach(v=>{
+    rows.push(cols.map(k=>csvCell(v[k]??null)).join(","));
+  });
+  const blob=new Blob([rows.join("\\r\\n")],{type:"text/csv"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`vulnfeed-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();URL.revokeObjectURL(a.href);
+});
 
 applyHash();
 applyFilters();

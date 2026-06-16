@@ -19,6 +19,12 @@ from urllib.error import HTTPError, URLError
 import xml.etree.ElementTree as ET
 
 HISTORICAL_DIR = "historical"
+BASE_URL = "https://nightwatch.sami.pw"
+
+
+def _xe(s):
+    """Escape text for HTML content / attribute values."""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +950,211 @@ def merge(vulns):
 
 
 # ---------------------------------------------------------------------------
+# Individual CVE page template
+# ---------------------------------------------------------------------------
+
+_CVE_PAGE_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>__CVE_TITLE_TAG__</title>
+<meta name="description" content="__CVE_META_DESC__">
+<meta property="og:title" content="__CVE_OG_TITLE__">
+<meta property="og:description" content="__CVE_META_DESC__">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary">
+<link rel="canonical" href="__CVE_CANONICAL__">
+<link rel="alternate" type="application/rss+xml" title="vulnfeed" href="__BASE_URL__/feed.xml">
+<script type="application/ld+json">__CVE_JSON_LD__</script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:#f8fafc;color:#1e293b;line-height:1.6}
+a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
+nav{background:#0f172a;padding:.75rem 2rem;display:flex;align-items:center;gap:1rem}
+.nav-logo{font-size:1rem;font-weight:700;color:#f1f5f9}
+.nav-logo em{color:#60a5fa;font-style:normal}
+.nav-back{font-size:.8rem;color:#94a3b8}
+.nav-back:hover{color:#cbd5e1;text-decoration:none}
+main{max-width:820px;margin:2rem auto;padding:0 1.5rem 4rem}
+.badges{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem}
+.b{display:inline-block;padding:.18rem .55rem;border-radius:5px;font-size:.72rem;
+  font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#fff}
+.bCRITICAL{background:#dc2626}.bHIGH{background:#ea580c}
+.bMEDIUM{background:#d97706}.bLOW{background:#16a34a}.bUNKNOWN{background:#6b7280}
+.bscore{background:#1e293b;font-family:ui-monospace,monospace}
+.bsrc{background:#334155}.bkev{background:#7c3aed}
+h1{font-size:1.55rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.4rem;line-height:1.25}
+.subtitle{font-size:.98rem;color:#475569;margin-bottom:1.3rem;font-weight:500}
+.desc-box{background:#fff;border:1px solid #e2e8f0;border-radius:10px;
+  padding:1.1rem 1.3rem;margin-bottom:1.4rem;font-size:.94rem;line-height:1.65;color:#334155}
+h2{font-size:.85rem;font-weight:700;color:#64748b;text-transform:uppercase;
+  letter-spacing:.06em;margin:1.3rem 0 .45rem;padding-bottom:.3rem;border-bottom:1px solid #e2e8f0}
+ul.ref-list{list-style:none;display:flex;flex-direction:column;gap:.28rem}
+ul.ref-list li{font-size:.85rem}
+ul.ref-list li a{word-break:break-all}
+ul.aff-list{list-style:none;display:flex;flex-direction:column;gap:.25rem}
+ul.aff-list li{font-family:ui-monospace,monospace;font-size:.82rem;background:#f1f5f9;
+  border:1px solid #e2e8f0;border-radius:4px;padding:.2rem .45rem;color:#334155}
+.meta-line{font-size:.76rem;color:#94a3b8;margin-top:1.4rem;padding-top:.7rem;
+  border-top:1px solid #e2e8f0}
+.meta-line strong{color:#475569}
+.cta{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
+  padding:.85rem 1.1rem;margin-top:1.4rem;font-size:.88rem;color:#1e3a8a;line-height:1.5}
+.cta a{color:#2563eb;font-weight:600}
+</style>
+</head>
+<body>
+<nav>
+  <a href="__BASE_URL__/" class="nav-logo">vuln<em>feed</em></a>
+  <a href="__BASE_URL__/" class="nav-back">&#8592; all vulnerabilities</a>
+</nav>
+<main>
+  <div class="badges">__CVE_BADGES__</div>
+  <h1>__CVE_ID_ESC__</h1>
+  <p class="subtitle">__CVE_TITLE_ESC__</p>
+  <div class="desc-box">__CVE_DESC_ESC__</div>
+__CVE_AFFECTED_HTML__
+__CVE_REFS_HTML__
+  <div class="meta-line">
+    Published: <strong>__CVE_DATE__</strong> &middot;
+    Source: <strong>__CVE_SRC_ESC__</strong> &middot;
+    Feed updated: <strong>__BUILD_DATE__</strong>
+  </div>
+  <div class="cta">
+    <a href="__BASE_URL__/">vulnfeed</a> aggregates __TOTAL_COUNT__ vulnerabilities from NVD, CISA KEV,
+    Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack &mdash; updated every 4 hours.
+  </div>
+</main>
+</body>
+</html>
+"""
+
+
+def write_cve_pages(vulns, date_str, base_url=BASE_URL):
+    """Generate individual HTML pages for critical / actively-exploited CVEs."""
+    candidates = [
+        v for v in vulns
+        if v["id"].startswith("CVE-") and (
+            v.get("severity") == "CRITICAL"
+            or (v.get("score") or 0) >= 9.0
+            or v.get("badge") == "ACTIVELY EXPLOITED"
+        )
+    ]
+    seen, unique = set(), []
+    for v in candidates:
+        if v["id"] not in seen:
+            seen.add(v["id"])
+            unique.append(v)
+
+    os.makedirs("cve", exist_ok=True)
+    total = len(vulns)
+
+    for v in unique:
+        cve_id = v["id"]
+        title  = v.get("title") or cve_id
+        desc   = v.get("description") or title
+        sev    = v.get("severity") or "UNKNOWN"
+        score  = v.get("score")
+        src    = v.get("source") or ""
+        pub    = v.get("published") or ""
+        badge  = v.get("badge") or ""
+        refs   = [r for r in (v.get("references") or []) if r][:8]
+        aff    = (v.get("affected") or [])[:12]
+
+        try:
+            pub_fmt = datetime.fromisoformat(pub.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        except Exception:
+            pub_fmt = pub[:10] if len(pub) >= 10 else "unknown"
+
+        title_short = title[:80] + ("…" if len(title) > 80 else "")
+        meta_desc   = _xe((desc[:157] + "…") if len(desc) > 157 else desc)
+
+        badges_html  = f'<span class="b b{_xe(sev)}">{_xe(sev)}</span>'
+        if score is not None:
+            badges_html += f' <span class="b bscore">{score:.1f}</span>'
+        badges_html += f' <span class="b bsrc">{_xe(src)}</span>'
+        if badge:
+            badges_html += f' <span class="b bkev">{_xe(badge)}</span>'
+
+        if aff:
+            aff_html = "  <h2>Affected Products</h2><ul class='aff-list'>" + \
+                       "".join(f"<li>{_xe(a)}</li>" for a in aff) + "</ul>"
+        else:
+            aff_html = ""
+
+        if refs:
+            refs_html = "  <h2>References</h2><ul class='ref-list'>" + \
+                        "".join(f'  <li><a href="{_xe(r)}" rel="noopener noreferrer" target="_blank">{_xe(r[:90])}</a></li>' for r in refs) + \
+                        "</ul>"
+        else:
+            refs_html = ""
+
+        ld = {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": f"{cve_id}: {title_short}",
+            "description": desc[:200],
+            "datePublished": pub_fmt,
+            "url": f"{base_url}/cve/{cve_id}.html",
+            "publisher": {"@type": "Organization", "name": "vulnfeed", "url": base_url},
+        }
+
+        page = _CVE_PAGE_HTML
+        page = page.replace("__CVE_TITLE_TAG__",      _xe(f"{cve_id}: {title_short} | vulnfeed"))
+        page = page.replace("__CVE_META_DESC__",       meta_desc)
+        page = page.replace("__CVE_OG_TITLE__",        _xe(f"{cve_id}: {title_short}"))
+        page = page.replace("__CVE_CANONICAL__",       f"{base_url}/cve/{cve_id}.html")
+        page = page.replace("__CVE_JSON_LD__",         json.dumps(ld, ensure_ascii=False))
+        page = page.replace("__CVE_BADGES__",          badges_html)
+        page = page.replace("__CVE_ID_ESC__",          _xe(cve_id))
+        page = page.replace("__CVE_TITLE_ESC__",       _xe(title))
+        page = page.replace("__CVE_DESC_ESC__",        _xe(desc))
+        page = page.replace("__CVE_AFFECTED_HTML__",   aff_html)
+        page = page.replace("__CVE_REFS_HTML__",       refs_html)
+        page = page.replace("__CVE_DATE__",            pub_fmt)
+        page = page.replace("__CVE_SRC_ESC__",         _xe(src))
+        page = page.replace("__BUILD_DATE__",          date_str)
+        page = page.replace("__TOTAL_COUNT__",         str(total))
+        page = page.replace("__BASE_URL__",            base_url)
+
+        with open(os.path.join("cve", f"{cve_id}.html"), "w", encoding="utf-8") as f:
+            f.write(page)
+
+    log(f"  Written: {len(unique)} CVE pages → cve/")
+    return unique
+
+
+def write_sitemap(cve_pages, date_str, base_url=BASE_URL):
+    def url_entry(loc, freq, pri):
+        return (
+            f"  <url><loc>{loc}</loc>"
+            f"<lastmod>{date_str}</lastmod>"
+            f"<changefreq>{freq}</changefreq>"
+            f"<priority>{pri}</priority></url>"
+        )
+
+    entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
+    for v in cve_pages:
+        entries.append(url_entry(f"{base_url}/cve/{v['id']}.html", "weekly", "0.8"))
+
+    with open("sitemap.xml", "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n')
+        f.write("\n".join(entries))
+        f.write("\n</urlset>")
+    log(f"  Written: sitemap.xml ({len(entries)} URLs)")
+
+
+def write_robots(base_url=BASE_URL):
+    with open("robots.txt", "w", encoding="utf-8") as f:
+        f.write(f"User-agent: *\nAllow: /\nSitemap: {base_url}/sitemap.xml\n")
+    log("  Written: robots.txt")
+
+
+# ---------------------------------------------------------------------------
 # HTML template
 # ---------------------------------------------------------------------------
 
@@ -955,6 +1166,15 @@ _HTML = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vulnfeed &mdash; __DATE__</title>
 <link rel="alternate" type="application/rss+xml" title="vulnfeed" href="/feed.xml">
+<meta name="description" content="vulnfeed — __COUNT__ security vulnerabilities aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack. Updated every 4 hours.">
+<meta property="og:title" content="vulnfeed — daily CVE digest">
+<meta property="og:description" content="__COUNT__ vulnerabilities aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes and more. Updated every 4 hours.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nightwatch.sami.pw/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="vulnfeed — daily CVE digest">
+<meta name="twitter:description" content="__COUNT__ CVEs from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack. Updated every 4 hours.">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"vulnfeed","url":"https://nightwatch.sami.pw","description":"Daily security vulnerability feed aggregating NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack."}</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -1086,6 +1306,15 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #empty{display:none;text-align:center;padding:4rem 2rem;color:var(--muted)}
 #empty h2{font-size:1.05rem;margin-bottom:.35rem;color:var(--text)}
 #sentinel{height:1px}
+
+#seo-index{padding:1rem 2rem 2rem;border-top:1px solid var(--border);margin-top:.5rem}
+#seo-index h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.07em;margin-bottom:.55rem}
+#seo-index ul{list-style:none;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.2rem}
+#seo-index li{font-size:.72rem;color:var(--muted);padding:.15rem .2rem;line-height:1.4}
+#seo-index li a{color:var(--accent);font-family:ui-monospace,monospace;font-size:.7rem;font-weight:600}
+#seo-index small{color:#94a3b8;margin-left:.25rem}
 
 @media(max-width:640px){
   header,#chart-wrap,.bar,.stats,#grid{padding-left:1rem;padding-right:1rem}
@@ -1421,6 +1650,7 @@ document.querySelectorAll(".view-btn[data-view]").forEach(b=>b.addEventListener(
 applyHash();
 applyFilters();
 </script>
+__STATIC_CVE_HTML__
 </body>
 </html>
 """
@@ -1698,17 +1928,51 @@ def main():
     log("Writing API outputs...")
     write_json_api(vulns)
     write_rss(vulns)
+    write_robots()
+
+    # --- CVE pages + sitemap ---
+    log("Writing CVE pages...")
+    cve_pages = write_cve_pages(vulns, date_str)
+    write_sitemap(cve_pages, date_str)
+
+    # --- Static HTML for SEO pre-render ---
+    critical_ids = {v["id"] for v in cve_pages}
+    top_static = sorted(
+        [v for v in vulns if v["id"].startswith("CVE-")],
+        key=lambda v: (
+            {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}.get(
+                v.get("severity", "UNKNOWN"), 4
+            ),
+            -(v.get("score") or 0),
+        ),
+    )[:50]
+
+    def _seo_li(v):
+        href = (f'/cve/{v["id"]}.html' if v["id"] in critical_ids
+                else f'https://nvd.nist.gov/vuln/detail/{v["id"]}')
+        sev  = v.get("severity", "")
+        sc   = f' {v["score"]:.1f}' if v.get("score") is not None else ""
+        ttl  = _xe((v.get("title") or "")[:100])
+        return f'<li><a href="{href}">{_xe(v["id"])}</a>: {ttl}<small>[{_xe(sev)}{sc}]</small></li>'
+
+    static_html = (
+        '<section id="seo-index">'
+        '<h2>Recent Critical &amp; High-Severity CVEs</h2>'
+        "<ul>" + "".join(_seo_li(v) for v in top_static) + "</ul>"
+        "</section>"
+    )
 
     json_blob  = json.dumps(vulns,     ensure_ascii=False, separators=(",", ":"))
     news_blob  = json.dumps(news,      ensure_ascii=False, separators=(",", ":"))
     dates_blob = json.dumps(hist_dates)
 
     html = _HTML
-    html = html.replace("__DATE__",       date_str)
-    html = html.replace("__COUNT__",      str(len(vulns)))
-    html = html.replace("__JSON__",       json_blob)
-    html = html.replace("__DATES_JSON__", dates_blob)
-    html = html.replace("__NEWS_JSON__",  news_blob)
+    html = html.replace("__DATE__",            date_str)
+    html = html.replace("__COUNT__",           str(len(vulns)))
+    html = html.replace("__JSON__",            json_blob)
+    html = html.replace("__DATES_JSON__",      dates_blob)
+    html = html.replace("__NEWS_JSON__",       news_blob)
+    html = html.replace("__STATIC_CVE_HTML__", static_html)
 
     out = "index.html"
     with open(out, "w", encoding="utf-8") as f:

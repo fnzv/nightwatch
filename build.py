@@ -53,6 +53,24 @@ def http_get(url, timeout=30, headers=None):
     return None
 
 
+def http_post(url, payload, timeout=60, headers=None):
+    h = {"User-Agent": "tldr-security-aggregator/1.0", "Content-Type": "application/json"}
+    if headers:
+        h.update(headers)
+    data = payload if isinstance(payload, bytes) else payload.encode()
+    req = Request(url, data=data, headers=h)
+    try:
+        with urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except HTTPError as e:
+        log(f"  HTTP {e.code} — {url}")
+    except URLError as e:
+        log(f"  Network error — {url}: {e.reason}")
+    except Exception as e:
+        log(f"  Error — {url}: {e}")
+    return None
+
+
 def strip_html(s):
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s or "")).strip()
 
@@ -1331,7 +1349,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   </div>
   <div style="text-align:right">
     <div class="today-badge"><span class="today-dot"></span><span id="todayN">&#8203;</span> new today &nbsp;<span id="todayDelta" style="font-size:.7rem;font-weight:500;opacity:.85"></span></div>
-    <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub</div>
+    <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub &middot; OSV</div>
     <div style="margin-top:.5rem;display:flex;gap:.4rem;align-items:center;justify-content:flex-end;flex-wrap:wrap">
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
@@ -1370,6 +1388,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <button class="pill" data-src="Exploit-DB">Exploit-DB</button>
     <button class="pill" data-src="Red Hat">Red Hat</button>
     <button class="pill" data-src="GitHub">GitHub</button>
+    <button class="pill" data-src="OSV">OSV</button>
   </div>
   <div class="pills">
     <span class="plabel">Period:</span>
@@ -1957,6 +1976,143 @@ def build_historical_index():
 
 
 # ---------------------------------------------------------------------------
+# Source: OSV.dev (Open Source Vulnerabilities)
+# ---------------------------------------------------------------------------
+
+# (ecosystem, package_name) — one batch request covers all of these
+OSV_PACKAGES = [
+    # Python
+    ("PyPI", "django"), ("PyPI", "flask"), ("PyPI", "fastapi"),
+    ("PyPI", "cryptography"), ("PyPI", "paramiko"), ("PyPI", "pillow"),
+    ("PyPI", "urllib3"), ("PyPI", "requests"), ("PyPI", "setuptools"),
+    ("PyPI", "pyjwt"), ("PyPI", "werkzeug"), ("PyPI", "jinja2"),
+    ("PyPI", "ansible"), ("PyPI", "apache-airflow"),
+    # Go — cloud-native infra
+    ("Go", "k8s.io/kubernetes"),
+    ("Go", "github.com/containerd/containerd"),
+    ("Go", "github.com/docker/docker"),
+    ("Go", "helm.sh/helm/v3"),
+    ("Go", "github.com/hashicorp/vault"),
+    ("Go", "github.com/traefik/traefik"),
+    ("Go", "github.com/cilium/cilium"),
+    ("Go", "istio.io/istio"),
+    ("Go", "github.com/argoproj/argo-cd"),
+    ("Go", "github.com/grafana/grafana"),
+    ("Go", "github.com/etcd-io/etcd"),
+    # npm
+    ("npm", "express"), ("npm", "axios"), ("npm", "lodash"),
+    ("npm", "next"), ("npm", "webpack"), ("npm", "node-fetch"),
+    ("npm", "jsonwebtoken"), ("npm", "semver"),
+    # Rust
+    ("crates.io", "openssl"), ("crates.io", "tokio"), ("crates.io", "rustls"),
+    # Java
+    ("Maven", "org.apache.logging.log4j:log4j-core"),
+    ("Maven", "org.springframework:spring-core"),
+    ("Maven", "org.apache.struts:struts2-core"),
+    ("Maven", "com.fasterxml.jackson.core:jackson-databind"),
+]
+
+
+def fetch_osv(days=7):
+    log(f"Fetching OSV.dev ({len(OSV_PACKAGES)} packages, one batch request)...")
+    cut = cutoff_utc(hours=days * 24)
+    SEV_MAP = {
+        "CRITICAL": "CRITICAL", "HIGH": "HIGH",
+        "MODERATE": "MEDIUM", "MEDIUM": "MEDIUM", "LOW": "LOW",
+    }
+
+    queries = [{"package": {"name": name, "ecosystem": eco}} for eco, name in OSV_PACKAGES]
+    payload = json.dumps({"queries": queries})
+
+    raw = http_post("https://api.osv.dev/v1/querybatch", payload, timeout=60)
+    if not raw:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as ex:
+        log(f"  OSV JSON error: {ex}")
+        return []
+
+    seen = set()
+    results = []
+
+    for batch in data.get("results", []):
+        for vuln in batch.get("vulns", []):
+            osv_id = vuln.get("id", "")
+            if not osv_id or osv_id in seen:
+                continue
+
+            # Filter by modified date — batch returns all historical vulns for each package
+            modified = vuln.get("modified", "")
+            try:
+                if datetime.fromisoformat(modified.replace("Z", "+00:00")) < cut:
+                    continue
+            except Exception:
+                pass
+
+            seen.add(osv_id)
+
+            # Prefer CVE alias as ID so dedup with NVD works
+            aliases = vuln.get("aliases") or []
+            cve_id = next((a for a in aliases if a.startswith("CVE-")), None)
+            vid = cve_id or osv_id
+
+            # Severity from database_specific (GitHub/PyPA populate this)
+            db_spec = vuln.get("database_specific") or {}
+            sev_str = (db_spec.get("severity") or "").upper()
+            severity = SEV_MAP.get(sev_str, "UNKNOWN")
+
+            # Numeric score from database_specific.cvss
+            score = None
+            cvss_info = db_spec.get("cvss") or {}
+            if isinstance(cvss_info, dict):
+                try:
+                    score = float(cvss_info.get("baseScore") or cvss_info.get("score") or 0) or None
+                except (ValueError, TypeError):
+                    pass
+
+            # Affected packages with fixed version
+            affected = []
+            for aff in (vuln.get("affected") or [])[:5]:
+                pkg = aff.get("package") or {}
+                pname = pkg.get("name", "")
+                peco  = pkg.get("ecosystem", "")
+                fixed = None
+                for rng in (aff.get("ranges") or []):
+                    for ev in rng.get("events", []):
+                        if "fixed" in ev:
+                            fixed = ev["fixed"]
+                            break
+                    if fixed:
+                        break
+                if pname:
+                    label = f"{peco}/{pname}" if peco else pname
+                    if fixed:
+                        label += f" → fix {fixed}"
+                    affected.append(label)
+
+            refs = [r["url"] for r in (vuln.get("references") or []) if r.get("url")][:3]
+            pub = vuln.get("published", modified)
+
+            results.append({
+                "id": vid,
+                "title": (vuln.get("summary") or vid)[:160],
+                "description": (vuln.get("details") or vuln.get("summary") or "")[:500],
+                "score": score,
+                "severity": severity,
+                "source": "OSV",
+                "published": pub,
+                "references": refs + [f"https://osv.dev/vulnerability/{osv_id}"],
+                "affected": affected[:8],
+                "url": f"https://osv.dev/vulnerability/{osv_id}",
+            })
+
+    log(f"  OSV: {len(results)} recent vulnerabilities")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Source: EPSS (Exploit Prediction Scoring System)
 # ---------------------------------------------------------------------------
 
@@ -2040,6 +2196,7 @@ def main():
     fresh += fetch_cisa()
     fresh += fetch_oss_security()
     fresh += fetch_github_advisories()
+    fresh += fetch_osv()
     fresh += fetch_kubernetes()
     fresh += fetch_exploitdb()
     fresh += fetch_redhat()

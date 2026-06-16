@@ -75,7 +75,7 @@ static_html = (
     "</section>"
 )
 
-json_blob    = json.dumps(vulns,      ensure_ascii=False, separators=(",", ":"))
+json_blob    = json.dumps(vulns,      ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 news_blob    = json.dumps(news,       ensure_ascii=False, separators=(",", ":"))
 dates_blob   = json.dumps(hist_dates)
 source_counts = {}

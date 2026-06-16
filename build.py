@@ -1034,15 +1034,8 @@ __CVE_REFS_HTML__
 
 
 def write_cve_pages(vulns, date_str, base_url=BASE_URL):
-    """Generate individual HTML pages for critical / actively-exploited CVEs."""
-    candidates = [
-        v for v in vulns
-        if v["id"].startswith("CVE-") and (
-            v.get("severity") == "CRITICAL"
-            or (v.get("score") or 0) >= 9.0
-            or v.get("badge") == "ACTIVELY EXPLOITED"
-        )
-    ]
+    """Generate individual HTML pages for all proper CVE-YYYY-NNNNN entries."""
+    candidates = [v for v in vulns if v["id"].startswith("CVE-")]
     seen, unique = set(), []
     for v in candidates:
         if v["id"] not in seen:
@@ -1244,6 +1237,10 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .cid{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.78rem;font-weight:700;
   color:var(--accent);text-decoration:none}
 .cid:hover{text-decoration:underline}
+.share-btn{background:none;border:none;padding:.15rem .2rem;cursor:pointer;
+  color:#94a3b8;border-radius:3px;display:inline-flex;align-items:center;
+  transition:color .12s,background .12s;vertical-align:middle;flex-shrink:0}
+.share-btn:hover{color:var(--accent);background:#f1f5f9}
 .bdgs{display:flex;gap:.28rem;flex-wrap:wrap;align-items:center}
 .b{display:inline-block;padding:.1rem .42rem;border-radius:4px;font-size:.65rem;
   font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#fff}
@@ -1295,7 +1292,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 
 #chart-wrap{background:var(--hdr);padding:.6rem 2rem .7rem;border-bottom:1px solid #1e293b}
 #chart-title{font-size:.65rem;color:#475569;margin-bottom:.55rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-#chart{position:relative;height:54px}
+#chart{position:relative;height:64px}
 #chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .chart-lbl-row{display:flex;margin-top:3px}
 .chart-lbl-row span{flex:1;text-align:center;font-size:.6rem;color:#334155}
@@ -1342,7 +1339,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 <div id="hist-banner"></div>
 
 <div id="chart-wrap">
-  <div id="chart-title">Vulnerabilities — last 7 days</div>
+  <div id="chart-title">Vulnerabilities — last 14 days</div>
   <div id="chart"></div>
 </div>
 
@@ -1444,26 +1441,73 @@ function updateSevBrk(){
 }
 updateSevBrk();
 
-// 7-day chart (always live data)
+// 14-day multi-severity chart (always live data)
 (function(){
-  const DAYS=7,VW=600,VH=54,PAD=6;
-  const counts=Array(DAYS).fill(0);
-  D_TODAY.forEach(v=>{if(!v._ts)return;const i=Math.floor((now-v._ts)/DAY);if(i>=0&&i<DAYS)counts[i]++;});
-  const vals=counts.slice().reverse();
-  const maxV=Math.max(...vals,1);
-  const labels=vals.map((_,i)=>new Date(now-(DAYS-1-i)*DAY).toLocaleDateString(undefined,{weekday:"short"}));
-  const xs=vals.map((_,i)=>PAD+(i/(DAYS-1))*(VW-PAD*2));
-  const ys=vals.map(n=>PAD+(1-n/maxV)*(VH-PAD*2));
-  const line=xs.map((x,i)=>(i===0?`M${x.toFixed(1)},${ys[i].toFixed(1)}`:`L${x.toFixed(1)},${ys[i].toFixed(1)}`)).join(" ");
-  const area=line+` L${xs[DAYS-1].toFixed(1)},${VH} L${xs[0].toFixed(1)},${VH} Z`;
-  const dots=xs.map((x,i)=>{
-    const t=i===DAYS-1;
-    return `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${t?3.5:2}" fill="${t?"#60a5fa":"#3b82f6"}" fill-opacity="${t?1:.7}"><title>${labels[i]}: ${vals[i]}</title></circle>`;
-  }).join("");
+  const DAYS=14,VW=600,VH=64,PAD=6;
+  const SERIES=[
+    {sev:"CRITICAL", color:"#dc2626", label:"Critical"},
+    {sev:"HIGH",     color:"#ea580c", label:"High"},
+    {sev:"MEDIUM",   color:"#d97706", label:"Medium"},
+  ];
+  const labels=Array.from({length:DAYS},(_,i)=>
+    new Date(now-(DAYS-1-i)*DAY).toLocaleDateString(undefined,{weekday:"short"})
+  );
+  const xs=Array.from({length:DAYS},(_,i)=>PAD+(i/(DAYS-1))*(VW-PAD*2));
+
+  SERIES.forEach(s=>{
+    const c=Array(DAYS).fill(0);
+    D_TODAY.forEach(v=>{
+      if(!v._ts||SEV(v)!==s.sev)return;
+      const i=Math.floor((now-v._ts)/DAY);
+      if(i>=0&&i<DAYS)c[i]++;
+    });
+    s.vals=c.slice().reverse();
+  });
+
+  const maxV=Math.max(...SERIES.flatMap(s=>s.vals),1);
+
+  let paths="";
+  SERIES.forEach(s=>{
+    const ys=s.vals.map(n=>PAD+(1-n/maxV)*(VH-PAD*2));
+    // Use M (moveto) for zero-count days so lines don't connect through them
+    let line="";
+    xs.forEach((x,i)=>{
+      const y=ys[i].toFixed(1);
+      if(s.vals[i]===0){line+=`M${x.toFixed(1)},${y} `;}
+      else if(i===0||s.vals[i-1]===0){line+=`M${x.toFixed(1)},${y} `;}
+      else{line+=`L${x.toFixed(1)},${y} `;}
+    });
+    // Only draw dots for non-zero days
+    const dots=xs.map((x,i)=>{
+      if(s.vals[i]===0)return"";
+      const t=i===DAYS-1;
+      return `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${t?3.5:2}" fill="${s.color}" fill-opacity="${t?1:.65}"><title>${labels[i]}: ${s.vals[i]} ${s.label}</title></circle>`;
+    }).join("");
+    paths+=`<path d="${line}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  });
+
+  const legend=SERIES.map(s=>
+    `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.6rem;color:${s.color};font-weight:600">
+      <svg width="14" height="3" viewBox="0 0 14 3"><line x1="0" y1="1.5" x2="14" y2="1.5" stroke="${s.color}" stroke-width="2"/></svg>${s.label}</span>`
+  ).join("");
+
   document.getElementById("chart").innerHTML=
-    `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28"/><stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02"/></linearGradient></defs><path d="${area}" fill="url(#cg)"/><path d="${line}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-opacity="0.65" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>`+
-    '<div class="chart-lbl-row">'+labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#60a5fa;font-weight:600":""}">${l}</span>`).join("")+'</div>';
+    `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`+
+    '<div class="chart-lbl-row">'+labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#94a3b8;font-weight:600":""}">${l}</span>`).join("")+'</div>'+
+    `<div style="display:flex;gap:.85rem;margin-top:.3rem;padding-left:${PAD}px">${legend}</div>`;
 })();
+
+function hasCvePage(v){
+  return v.id.startsWith("CVE-");
+}
+function copyLink(btn,path){
+  const url=location.origin+path;
+  navigator.clipboard.writeText(url).then(()=>{
+    const prev=btn.innerHTML;
+    btn.textContent="✓";btn.style.color="#4ade80";
+    setTimeout(()=>{btn.innerHTML=prev;btn.style.color="";},1500);
+  }).catch(()=>prompt("Copy link:",url));
+}
 
 function card(v){
   const sc=v.score!=null?`<span class="b bsc">${v.score.toFixed(1)}</span>`:"";
@@ -1475,7 +1519,9 @@ function card(v){
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
   const dsc=v.description?`<div class="cdesc">${esc(v.description)}</div>`:"";
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
-  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a><div class="bdgs">${sc}${sv}${sr}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
+  const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
+  return `<div class="card" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${sc}${sv}${sr}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){

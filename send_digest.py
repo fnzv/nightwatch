@@ -41,9 +41,14 @@ VENDOR_GROUPS = [
 
 # Sources that are authoritative for a given vendor (used to restrict noisy keyword matches)
 VENDOR_AUTHORITATIVE_SOURCES = {
-    "kubernetes":   {"kubernetes"},           # only official k8s advisory feed
-    "linux-kernel": {"ubuntu", "debian"},     # only distro security advisories, not random NVD noise
+    "kubernetes":    {"kubernetes"},              # only official k8s advisory feed
+    "linux-kernel":  {"ubuntu", "debian"},        # only distro security advisories, not random NVD noise
+    "openstack":     {"openstack", "oss-security"},# official OSSAs only, not Ubuntu USNs about Ironic
 }
+
+# Vendors where the keyword must appear in the title (not just description/affected)
+# — prevents broad keyword matches on unrelated CVEs
+VENDOR_TITLE_ONLY = {"nginx-traefik"}
 
 
 def load_week():
@@ -137,10 +142,10 @@ def cve_card(v):
     )
 
 
-def vendor_mini_section(display_name, slug, vulns, keywords, n=5):
+def vendor_mini_section(display_name, slug, vulns, keywords, n=5, title_only=False):
     """Top N CVEs for a vendor as a compact block. Returns empty string if no matches."""
     matched = sorted(
-        [v for v in vulns if match_vendor(v, keywords)],
+        [v for v in vulns if match_vendor(v, keywords, title_only=title_only)],
         key=lambda v: (
             0 if v.get("kev") else 1,
             SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
@@ -173,12 +178,16 @@ def build_email_html(vulns, week_end):
     k8s_vulns    = [v for v in vulns if v.get("source", "").lower() == "kubernetes"]
     k8s_section  = vendor_mini_section("Kubernetes",  "kubernetes",  k8s_vulns,
                                        ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"])
-    osp_section  = vendor_mini_section("OpenStack",   "openstack",   vulns,
-                                       ["openstack", "nova", "neutron", "keystone", "cinder", "glance"])
+    osp_vulns    = [v for v in vulns if v.get("source", "").lower() in {"openstack", "oss-security"}]
+    osp_section  = vendor_mini_section("OpenStack",   "openstack",   osp_vulns,
+                                       ["openstack", "nova", "neutron", "keystone", "cinder", "glance", "ironic", "cyborg"])
     # Only Ubuntu/Debian advisories for kernel — NVD is full of noise (smb, batman-adv, etc.)
-    kernel_vulns  = [v for v in vulns if v.get("source", "").lower() in {"ubuntu", "debian"}]
+    kernel_vulns   = [v for v in vulns if v.get("source", "").lower() in {"ubuntu", "debian"}]
     kernel_section = vendor_mini_section("Linux Kernel", "linux-kernel", kernel_vulns,
-                                        ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"])
+                                         ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"])
+    # nginx/Traefik: title-only match to avoid Apache, TLS noise
+    nginx_section  = vendor_mini_section("nginx / Traefik", "nginx-traefik", vulns,
+                                         ["nginx", "traefik"], title_only=True)
 
     return f"""<!DOCTYPE html>
 <html>
@@ -213,6 +222,9 @@ def build_email_html(vulns, week_end):
     <!-- linux kernel -->
     {kernel_section}
 
+    <!-- nginx / traefik -->
+    {nginx_section}
+
     <p style="margin:1.6rem 0 0;font-size:.82rem;color:#64748b;text-align:center;border-top:1px solid #e2e8f0;padding-top:1rem">
       <a href="{digest_url}" style="color:#2563eb;font-weight:600;text-decoration:none">Full digest &rarr;</a>
       &nbsp;&middot;&nbsp;
@@ -235,18 +247,21 @@ def build_email_html(vulns, week_end):
 </html>"""
 
 
-def match_vendor(v, keywords):
-    haystack = " ".join([
-        v.get("id", ""), v.get("title", ""), v.get("description", ""),
-        *v.get("affected", []),
-    ]).lower()
+def match_vendor(v, keywords, title_only=False):
+    if title_only:
+        haystack = (v.get("title") or "").lower()
+    else:
+        haystack = " ".join([
+            v.get("id", ""), v.get("title", ""), v.get("description", ""),
+            *v.get("affected", []),
+        ]).lower()
     return any(kw in haystack for kw in keywords)
 
 
-def build_vendor_section(display_name, slug, vulns, keywords):
+def build_vendor_section(display_name, slug, vulns, keywords, title_only=False):
     """Return an HTML section string for one vendor group (up to 10 CVEs)."""
     matched = sorted(
-        [v for v in vulns if match_vendor(v, keywords)],
+        [v for v in vulns if match_vendor(v, keywords, title_only=title_only)],
         key=lambda v: (SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)),
     )[:10]
 
@@ -301,7 +316,8 @@ def build_vendor_email_html(vulns, week_end):
     for display_name, slug, keywords in VENDOR_GROUPS:
         allowed_sources = VENDOR_AUTHORITATIVE_SOURCES.get(slug)
         pool = [v for v in vulns if v.get("source", "").lower() in allowed_sources] if allowed_sources else vulns
-        section = build_vendor_section(display_name, slug, pool, keywords)
+        title_only = slug in VENDOR_TITLE_ONLY
+        section = build_vendor_section(display_name, slug, pool, keywords, title_only=title_only)
         if section:
             sections += section
             total_matched += sum(1 for v in vulns if match_vendor(v, keywords))

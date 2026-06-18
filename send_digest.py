@@ -189,7 +189,7 @@ def send(api_key, subject, html_body):
     payload = json.dumps({
         "subject": subject,
         "body": html_body,
-        "status": "scheduled",
+        "status": "about_to_send",
     }).encode()
     req = Request(
         BUTTONDOWN_API,

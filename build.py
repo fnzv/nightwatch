@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 import xml.etree.ElementTree as ET
 
 HISTORICAL_DIR = "historical"
-BASE_URL = "https://nightwatch.sami.pw"
+BASE_URL = "https://vulnfeed.it"
 
 
 def _xe(s):
@@ -724,6 +724,154 @@ def fetch_redhat(days=7):
 
 
 # ---------------------------------------------------------------------------
+# Source: Cisco PSIRT (public RSS)
+# ---------------------------------------------------------------------------
+
+def fetch_cisco():
+    log("Fetching Cisco PSIRT advisories...")
+    raw = http_get("https://sec.cloudapps.cisco.com/security/center/rss/advisory.xml")
+    if not raw:
+        return []
+
+    cut = cutoff_utc(hours=24 * 14)  # 2 weeks
+    results = []
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as ex:
+        log(f"  Cisco XML error: {ex}")
+        return []
+
+    ns = {"cvss": "http://scap.nist.gov/schema/cvss-v2/0.2"}
+
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link  = (item.findtext("link")  or "").strip()
+        desc  = (item.findtext("description") or "").strip()
+        pub   = (item.findtext("pubDate") or "").strip()
+
+        try:
+            if parsedate_to_datetime(pub).astimezone(timezone.utc) < cut:
+                continue
+        except Exception:
+            pass
+
+        cves  = list(dict.fromkeys(re.findall(r"CVE-\d{4}-\d+", desc + " " + title)))
+        score_raw = item.findtext("cvss:score", namespaces=ns)
+        score = None
+        try:
+            score = float(score_raw) if score_raw else None
+        except (ValueError, TypeError):
+            pass
+
+        sev = "UNKNOWN"
+        if score is not None:
+            if score >= 9.0:   sev = "CRITICAL"
+            elif score >= 7.0: sev = "HIGH"
+            elif score >= 4.0: sev = "MEDIUM"
+            else:              sev = "LOW"
+
+        advisory_id = re.search(r"cisco-sa-[\w-]+", link)
+        vid = advisory_id.group(0).upper() if advisory_id else (cves[0] if cves else title[:60])
+
+        results.append({
+            "id": vid,
+            "title": title,
+            "description": strip_html(desc)[:600],
+            "score": score,
+            "severity": sev,
+            "source": "Cisco",
+            "published": pub,
+            "references": [link] + [f"https://nvd.nist.gov/vuln/detail/{c}" for c in cves[:2]],
+            "affected": cves[:8],
+            "url": link,
+        })
+
+    log(f"  Cisco: {len(results)} advisories")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Source: Arista Security Advisories (HTML listing scrape)
+# ---------------------------------------------------------------------------
+
+def fetch_arista():
+    log("Fetching Arista Security Advisories...")
+    raw = http_get("https://www.arista.com/en/support/advisories-notices/security-advisories")
+    if not raw:
+        return []
+
+    content = raw.decode("utf-8", errors="replace")
+    cut = cutoff_utc(hours=24 * 60)  # ~2 months
+
+    # Find advisory links: /en/support/advisories-notices/security-advisories/XXXX-XXXX-XXX.html
+    links = re.findall(
+        r'href="(/en/support/advisories-notices/security-advisories/[\w-]+\.html)"[^>]*>([^<]+)',
+        content,
+    )
+    if not links:
+        log("  Arista: no advisory links found on listing page")
+        return []
+
+    results = []
+    seen = set()
+    base = "https://www.arista.com"
+
+    for path, link_text in links[:30]:
+        if path in seen:
+            continue
+        seen.add(path)
+
+        url = base + path
+        page_raw = http_get(url)
+        if not page_raw:
+            continue
+
+        page = page_raw.decode("utf-8", errors="replace")
+
+        cves = list(dict.fromkeys(re.findall(r"CVE-\d{4}-\d+", page)))
+        cvss_m = re.search(r"(?:CVSS(?:\s+v\d)?(?:\s+Base)?\s+Score[:\s]+)(\d+(?:\.\d+)?)", page, re.I)
+        score = None
+        try:
+            score = float(cvss_m.group(1)) if cvss_m else None
+        except (ValueError, TypeError):
+            pass
+
+        sev = "UNKNOWN"
+        if score is not None:
+            if score >= 9.0:   sev = "CRITICAL"
+            elif score >= 7.0: sev = "HIGH"
+            elif score >= 4.0: sev = "MEDIUM"
+            else:              sev = "LOW"
+
+        title = link_text.strip()
+        sa_m = re.search(r"((?:EoSA|SA)-\d{4}-\d+)", page, re.I)
+        vid = sa_m.group(1).upper() if sa_m else (cves[0] if cves else title[:60])
+
+        date_m = re.search(
+            r"(?:Published|Date)[:\s]+(\w+ \d{1,2},?\s+\d{4})", page, re.I
+        )
+        pub_str = date_m.group(1) if date_m else ""
+
+        results.append({
+            "id": vid,
+            "title": title,
+            "description": "",
+            "score": score,
+            "severity": sev,
+            "source": "Arista",
+            "published": pub_str,
+            "references": [url] + [f"https://nvd.nist.gov/vuln/detail/{c}" for c in cves[:2]],
+            "affected": cves[:8],
+            "url": url,
+        })
+        time.sleep(0.5)
+
+    log(f"  Arista: {len(results)} advisories")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Source: OpenStack Security Notes (OSSNs)
 # ---------------------------------------------------------------------------
 
@@ -1179,17 +1327,18 @@ _HTML = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <title>vulnfeed &mdash; __DATE__</title>
 <link rel="alternate" type="application/rss+xml" title="vulnfeed" href="/feed.xml">
 <meta name="description" content="vulnfeed — __COUNT__ security vulnerabilities aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack. Updated every 4 hours.">
 <meta property="og:title" content="vulnfeed — daily CVE digest">
 <meta property="og:description" content="__COUNT__ vulnerabilities aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes and more. Updated every 4 hours.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://nightwatch.sami.pw/">
+<meta property="og:url" content="https://vulnfeed.it/">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="vulnfeed — daily CVE digest">
 <meta name="twitter:description" content="__COUNT__ CVEs from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack. Updated every 4 hours.">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"vulnfeed","url":"https://nightwatch.sami.pw","description":"Daily security vulnerability feed aggregating NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack."}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"vulnfeed","url":"https://vulnfeed.it","description":"Daily security vulnerability feed aggregating NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack."}</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -2027,7 +2176,7 @@ def _rfc822(pub):
     return ""
 
 
-def write_rss(vulns, base_url="https://nightwatch.sami.pw"):
+def write_rss(vulns, base_url=BASE_URL):
     def xe(s):
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -2300,6 +2449,7 @@ _STATS_HTML = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <title>vulnfeed stats &mdash; __DATE__</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -2534,6 +2684,8 @@ VENDOR_PAGES = [
     ("ansible",      "Ansible",           "ansible"),
     ("jenkins",      "Jenkins",           "jenkins"),
     ("gitlab",       "GitLab",            "gitlab"),
+    ("cisco",        "Cisco",             "cisco"),
+    ("arista",       "Arista",            "arista"),
 ]
 
 _VENDOR_HTML = """\
@@ -2542,6 +2694,7 @@ _VENDOR_HTML = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <title>__VENDOR__ vulnerabilities &mdash; vulnfeed</title>
 <meta name="description" content="__COUNT__ recent vulnerabilities for __VENDOR__ aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat and more.">
 <style>
@@ -2678,6 +2831,8 @@ def main():
     fresh += fetch_kubernetes()
     fresh += fetch_exploitdb()
     fresh += fetch_redhat()
+    fresh += fetch_cisco()
+    fresh += fetch_arista()
     fresh += fetch_openstack_ossa(months=3)
     fresh += fetch_openstack_ossn(months=3)
 

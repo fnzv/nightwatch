@@ -19,7 +19,7 @@ from urllib.error import HTTPError
 HISTORICAL_DIR = "historical"
 BUTTONDOWN_API  = "https://api.buttondown.email/v1/emails"
 BASE_URL        = "https://vulnfeed.it"
-TOP_N           = 20
+TOP_N           = 5   # critical/KEV highlights in the weekly email
 
 SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 SEV_COLOR = {
@@ -61,120 +61,145 @@ def load_week():
     return vulns, latest_date
 
 
-def top_cves(vulns):
+def top_cves(vulns, n=TOP_N):
+    # KEV (exploited) first, then by severity, then EPSS, then CVSS
     return sorted(
         [v for v in vulns if v["id"].startswith("CVE-")],
         key=lambda v: (
+            0 if v.get("kev") else 1,
             SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
             -(v.get("epss") or 0),
             -(v.get("score") or 0),
         ),
-    )[:TOP_N]
+    )[:n]
+
+
+def build_tldr(vulns, week_end):
+    """One-paragraph TLDR summary of the week."""
+    n_total = len([v for v in vulns if v["id"].startswith("CVE-")])
+    n_crit  = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
+    n_kev   = sum(1 for v in vulns if v.get("kev"))
+    top3    = top_cves(vulns, 3)
+
+    notable = []
+    for v in top3:
+        cve_id = v["id"]
+        title  = (v.get("title") or "").strip()
+        # extract the most meaningful part of the title
+        short  = title.split("—")[0].split(" in ")[-1].split(" via ")[0].strip()
+        score  = f'CVSS {v["score"]:.1f}' if v.get("score") else ""
+        kev    = "actively exploited" if v.get("kev") else ""
+        parts  = ", ".join(p for p in [short[:60], score, kev] if p)
+        notable.append(f"<strong>{xe(cve_id)}</strong> ({xe(parts)})")
+
+    notable_str = "; ".join(notable) if notable else ""
+    kev_str = f" <strong>{n_kev} are actively exploited</strong> (CISA KEV)." if n_kev else "."
+
+    return (
+        f"{n_total:,} CVEs tracked this week &mdash; "
+        f"<span style='color:#dc2626;font-weight:700'>{n_crit} critical</span>{kev_str}"
+        + (f" Notable: {notable_str}." if notable_str else "")
+    )
 
 
 def xe(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def cve_card(v):
+    """Render a single CVE as a compact card row."""
+    sev     = v.get("severity", "UNKNOWN")
+    color   = SEV_COLOR.get(sev, "#6b7280")
+    score   = f'CVSS {v["score"]:.1f}' if v.get("score") is not None else ""
+    epss    = f'EPSS {v["epss"]*100:.1f}%' if v.get("epss") else ""
+    kev_tag = ('<span style="background:#7c3aed;color:#fff;font-size:.6rem;font-weight:700;'
+               'padding:.05rem .3rem;border-radius:3px;margin-left:.3rem">KEV</span>'
+               if v.get("kev") else "")
+    meta    = " &middot; ".join(p for p in [score, epss] if p)
+    url     = f"{BASE_URL}/cve/{v['id']}.html"
+    title   = xe((v.get("title") or v["id"])[:110])
+    return (
+        f'<div style="border-left:3px solid {color};padding:.6rem .9rem;margin-bottom:.6rem;background:#f8fafc;border-radius:0 6px 6px 0">'
+        f'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.2rem">'
+        f'<a href="{url}" style="font-family:monospace;font-weight:700;font-size:.82rem;color:#2563eb;text-decoration:none">{xe(v["id"])}</a>'
+        f'<span style="background:{color};color:#fff;font-size:.6rem;font-weight:700;padding:.05rem .3rem;border-radius:3px;text-transform:uppercase">{xe(sev)}</span>'
+        f'{kev_tag}'
+        f'</div>'
+        f'<div style="font-size:.8rem;color:#1e293b;line-height:1.4">{title}</div>'
+        + (f'<div style="font-size:.72rem;color:#64748b;margin-top:.15rem">{meta}</div>' if meta else '')
+        + f'</div>'
+    )
+
+
+def vendor_mini_section(display_name, slug, vulns, keywords, n=5):
+    """Top N CVEs for a vendor as a compact block. Returns empty string if no matches."""
+    matched = sorted(
+        [v for v in vulns if match_vendor(v, keywords)],
+        key=lambda v: (
+            0 if v.get("kev") else 1,
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
+            -(v.get("score") or 0),
+        ),
+    )[:n]
+    if not matched:
+        return ""
+    cards = "".join(cve_card(v) for v in matched)
+    vendor_url = f"{BASE_URL}/vendor/{slug}.html"
+    return (
+        f'<div style="margin-top:1.6rem">'
+        f'<div style="font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;'
+        f'letter-spacing:.08em;margin-bottom:.6rem">'
+        f'<a href="{vendor_url}" style="color:#2563eb;text-decoration:none">{xe(display_name)}</a>'
+        f' &mdash; {len(matched)} CVE{"s" if len(matched) != 1 else ""} this week</div>'
+        f'{cards}'
+        f'</div>'
+    )
+
+
 def build_email_html(vulns, week_end):
-    top     = top_cves(vulns)
-    n_crit  = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
-    n_high  = sum(1 for v in vulns if v.get("severity") == "HIGH")
-    n_expl  = sum(1 for v in vulns if v.get("kev"))
-
-    rows = ""
-    for v in top:
-        sev    = v.get("severity", "UNKNOWN")
-        color  = SEV_COLOR.get(sev, "#6b7280")
-        score  = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
-        epss   = f'{v["epss"] * 100:.1f}%' if v.get("epss") else "—"
-        kev    = ' <span style="color:#7c3aed;font-weight:700;font-size:.7rem">KEV</span>' if v.get("kev") else ""
-        cve_url = f"{BASE_URL}/cve/{v['id']}.html"
-        title  = xe((v.get("title") or "")[:120])
-        rows += (
-            f'<tr>'
-            f'<td style="padding:.5rem .75rem;border-bottom:1px solid #e2e8f0;white-space:nowrap">'
-            f'<a href="{cve_url}" style="color:#2563eb;font-family:monospace;font-weight:700;'
-            f'font-size:.8rem;text-decoration:none">{xe(v["id"])}</a>'
-            f'</td>'
-            f'<td style="padding:.5rem .75rem;border-bottom:1px solid #e2e8f0">'
-            f'<span style="background:{color};color:#fff;padding:.08rem .4rem;border-radius:3px;'
-            f'font-size:.65rem;font-weight:700;text-transform:uppercase">{xe(sev)}</span>'
-            f'</td>'
-            f'<td style="padding:.5rem .75rem;border-bottom:1px solid #e2e8f0;font-size:.78rem;color:#1e293b">'
-            f'{title}{kev}'
-            f'</td>'
-            f'<td style="padding:.5rem .75rem;border-bottom:1px solid #e2e8f0;font-size:.78rem;'
-            f'color:#475569;white-space:nowrap;text-align:right">{xe(score)}</td>'
-            f'<td style="padding:.5rem .75rem;border-bottom:1px solid #e2e8f0;font-size:.78rem;'
-            f'color:#7c3aed;white-space:nowrap;text-align:right">{xe(epss)}</td>'
-            f'</tr>'
-        )
-
+    tldr       = build_tldr(vulns, week_end)
+    highlights = top_cves(vulns, TOP_N)
     digest_url = f"{BASE_URL}/digest/{week_end}.html"
+
+    highlight_cards = "".join(cve_card(v) for v in highlights)
+
+    k8s_section  = vendor_mini_section("Kubernetes",  "kubernetes",  vulns,
+                                       ["kubernetes", "k8s", "etcd", "kubectl", "kubelet"])
+    osp_section  = vendor_mini_section("OpenStack",   "openstack",   vulns,
+                                       ["openstack", "nova", "neutron", "keystone", "cinder", "glance"])
 
     return f"""<!DOCTYPE html>
 <html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;margin:0;padding:0">
-<div style="max-width:700px;margin:0 auto;padding:2rem 1rem">
+<div style="max-width:640px;margin:0 auto;padding:2rem 1rem">
 
-  <!-- header -->
   <div style="background:#0f172a;padding:1.2rem 1.8rem;border-radius:10px 10px 0 0">
     <span style="font-size:1.3rem;font-weight:800;color:#f1f5f9">vuln<span style="color:#60a5fa">feed</span></span>
-    <span style="font-size:.75rem;color:#94a3b8;margin-left:1rem">Weekly Security Digest &mdash; {xe(week_end)}</span>
+    <span style="font-size:.75rem;color:#94a3b8;margin-left:1rem">Weekly digest &mdash; {xe(week_end)}</span>
   </div>
 
-  <!-- body -->
   <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:1.5rem 1.8rem">
 
-    <!-- summary stats -->
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.75rem 1.2rem;min-width:120px">
-        <div style="font-size:1.6rem;font-weight:800;color:#0f172a">{len(vulns)}</div>
-        <div style="font-size:.72rem;color:#64748b">Total CVEs</div>
-      </div>
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:.75rem 1.2rem;min-width:120px">
-        <div style="font-size:1.6rem;font-weight:800;color:#dc2626">{n_crit}</div>
-        <div style="font-size:.72rem;color:#64748b">Critical</div>
-      </div>
-      <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:.75rem 1.2rem;min-width:120px">
-        <div style="font-size:1.6rem;font-weight:800;color:#ea580c">{n_high}</div>
-        <div style="font-size:.72rem;color:#64748b">High</div>
-      </div>
-      <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:.75rem 1.2rem;min-width:120px">
-        <div style="font-size:1.6rem;font-weight:800;color:#7c3aed">{n_expl}</div>
-        <div style="font-size:.72rem;color:#64748b">Actively Exploited</div>
-      </div>
+    <!-- TLDR -->
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:.85rem 1.1rem;
+                margin-bottom:1.5rem;font-size:.85rem;color:#1e3a8a;line-height:1.6">
+      <strong>TL;DR &mdash;</strong> {tldr}
     </div>
 
-    <!-- top CVEs table -->
+    <!-- highlights -->
     <div style="font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;
-                letter-spacing:.08em;margin-bottom:.75rem">Top {TOP_N} vulnerabilities</div>
-    <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
-      <thead>
-        <tr style="background:#f8fafc">
-          <th style="text-align:left;padding:.5rem .75rem;border-bottom:2px solid #e2e8f0;
-                     font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">CVE</th>
-          <th style="text-align:left;padding:.5rem .75rem;border-bottom:2px solid #e2e8f0;
-                     font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Sev</th>
-          <th style="text-align:left;padding:.5rem .75rem;border-bottom:2px solid #e2e8f0;
-                     font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Description</th>
-          <th style="text-align:right;padding:.5rem .75rem;border-bottom:2px solid #e2e8f0;
-                     font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">CVSS</th>
-          <th style="text-align:right;padding:.5rem .75rem;border-bottom:2px solid #e2e8f0;
-                     font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">EPSS</th>
-        </tr>
-      </thead>
-      <tbody>{rows}</tbody>
-    </table>
+                letter-spacing:.08em;margin-bottom:.6rem">Must-patch this week</div>
+    {highlight_cards}
 
-    <!-- footer links -->
-    <p style="margin:1.5rem 0 0;font-size:.82rem;color:#64748b;text-align:center">
-      <a href="{digest_url}" style="color:#2563eb;font-weight:600;text-decoration:none">View full digest &rarr;</a>
+    <!-- kubernetes -->
+    {k8s_section}
+
+    <!-- openstack -->
+    {osp_section}
+
+    <p style="margin:1.6rem 0 0;font-size:.82rem;color:#64748b;text-align:center;border-top:1px solid #e2e8f0;padding-top:1rem">
+      <a href="{digest_url}" style="color:#2563eb;font-weight:600;text-decoration:none">Full digest &rarr;</a>
       &nbsp;&middot;&nbsp;
       <a href="{BASE_URL}/" style="color:#2563eb;font-weight:600;text-decoration:none">Live feed</a>
       &nbsp;&middot;&nbsp;
@@ -182,12 +207,11 @@ def build_email_html(vulns, week_end):
     </p>
   </div>
 
-  <!-- unsubscribe footer -->
   <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-top:none;padding:.75rem 1.8rem;
               border-radius:0 0 10px 10px;text-align:center">
     <span style="font-size:.7rem;color:#94a3b8">
-      You subscribed to the vulnfeed weekly digest.
-      <a href="{{ unsubscribe_url }}" style="color:#94a3b8">Unsubscribe</a>
+      vulnfeed weekly digest.
+      <a href="{{{{ unsubscribe_url }}}}" style="color:#94a3b8">Unsubscribe</a>
     </span>
   </div>
 

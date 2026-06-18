@@ -1494,12 +1494,12 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #seo-index li a{color:var(--accent);font-family:ui-monospace,monospace;font-size:.7rem;font-weight:600}
 #seo-index small{color:#94a3b8;margin-left:.25rem}
 
-#vendor-browse{padding:1.25rem 2rem 1.75rem;border-top:1px solid var(--border)}
-#vendor-browse h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.75rem}
-.vb-grid{display:flex;flex-wrap:wrap;gap:.45rem}
-.vb-link{display:inline-flex;align-items:center;gap:.35rem;padding:.28rem .65rem;border:1px solid var(--border);border-radius:20px;font-size:.75rem;font-weight:600;color:var(--accent);text-decoration:none;background:var(--card);transition:border-color .15s,background .15s}
-.vb-link:hover{border-color:var(--accent);background:#eff6ff;text-decoration:none}
-.vb-link span{font-size:.65rem;color:var(--muted);font-weight:400}
+#vendor-browse{padding:.45rem 2rem;border-bottom:1px solid #1e293b;background:var(--hdr);display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+#vendor-browse h2{font-size:.63rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;flex-shrink:0}
+.vb-grid{display:flex;flex-wrap:wrap;gap:.3rem}
+.vb-link{display:inline-flex;align-items:center;gap:.25rem;padding:.18rem .5rem;border:1px solid #334155;border-radius:12px;font-size:.68rem;font-weight:600;color:#93c5fd;text-decoration:none;background:transparent;transition:border-color .15s,background .15s}
+.vb-link:hover{border-color:#60a5fa;background:rgba(96,165,250,.1);text-decoration:none}
+.vb-link span{font-size:.6rem;color:#64748b;font-weight:400}
 
 /* Watchlist */
 .card.watched{outline:2px solid #f59e0b;outline-offset:-1px}
@@ -1547,6 +1547,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   </div>
 </header>
 <div id="hist-banner"></div>
+__VENDOR_INDEX_HTML__
 <div id="wl-panel">
   <span style="font-size:.72rem;color:#a8a29e;font-weight:600;white-space:nowrap">&#9733; Watchlist keywords:</span>
   <div id="wl-tags" style="display:flex;flex-wrap:wrap;gap:.3rem"></div>
@@ -2054,7 +2055,6 @@ document.getElementById("csvBtn").addEventListener("click",()=>{
 applyHash();
 applyFilters();
 </script>
-__VENDOR_INDEX_HTML__
 __STATIC_CVE_HTML__
 </body>
 </html>

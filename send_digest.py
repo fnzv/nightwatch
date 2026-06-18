@@ -33,11 +33,16 @@ SEV_COLOR = {
 # Vendor groups for the infrastructure digest.
 # Each entry: (display_name, slug, [keywords])  — any keyword match → included.
 VENDOR_GROUPS = [
-    ("Kubernetes",    "kubernetes",   ["kubernetes", "k8s", "etcd", "kubectl", "kubelet"]),
-    ("OpenStack",     "openstack",    ["openstack", "nova", "neutron", "keystone", "cinder", "glance"]),
-    ("Linux Kernel",  "linux-kernel", ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"]),
+    ("Kubernetes",      "kubernetes",    ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"]),
+    ("OpenStack",       "openstack",     ["openstack", "nova", "neutron", "keystone", "cinder", "glance"]),
+    ("Linux Kernel",    "linux-kernel",  ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"]),
     ("nginx / Traefik", "nginx-traefik", ["nginx", "traefik"]),
 ]
+
+# Sources that are authoritative for a given vendor (used to restrict noisy keyword matches)
+VENDOR_AUTHORITATIVE_SOURCES = {
+    "kubernetes": {"kubernetes"},  # only official k8s advisory feed
+}
 
 
 def load_week():
@@ -163,8 +168,10 @@ def build_email_html(vulns, week_end):
 
     highlight_cards = "".join(cve_card(v) for v in highlights)
 
-    k8s_section  = vendor_mini_section("Kubernetes",  "kubernetes",  vulns,
-                                       ["kubernetes", "k8s", "etcd", "kubectl", "kubelet"])
+    # Only official Kubernetes CVEs (source=Kubernetes) to avoid Azure/Fission/golang noise
+    k8s_vulns    = [v for v in vulns if v.get("source", "").lower() == "kubernetes"]
+    k8s_section  = vendor_mini_section("Kubernetes",  "kubernetes",  k8s_vulns,
+                                       ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"])
     osp_section  = vendor_mini_section("OpenStack",   "openstack",   vulns,
                                        ["openstack", "nova", "neutron", "keystone", "cinder", "glance"])
 
@@ -284,7 +291,9 @@ def build_vendor_email_html(vulns, week_end):
     sections = ""
     total_matched = 0
     for display_name, slug, keywords in VENDOR_GROUPS:
-        section = build_vendor_section(display_name, slug, vulns, keywords)
+        allowed_sources = VENDOR_AUTHORITATIVE_SOURCES.get(slug)
+        pool = [v for v in vulns if v.get("source", "").lower() in allowed_sources] if allowed_sources else vulns
+        section = build_vendor_section(display_name, slug, pool, keywords)
         if section:
             sections += section
             total_matched += sum(1 for v in vulns if match_vendor(v, keywords))

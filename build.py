@@ -872,6 +872,282 @@ def fetch_arista():
 
 
 # ---------------------------------------------------------------------------
+# Source: Microsoft Security Response Center (MSRC) — Patch Tuesday
+# ---------------------------------------------------------------------------
+
+def fetch_msrc():
+    log("Fetching Microsoft MSRC (Patch Tuesday)...")
+
+    raw = http_get(
+        "https://api.msrc.microsoft.com/cvrf/v2.0/updates",
+        headers={"Accept": "application/json"},
+    )
+    if not raw:
+        return []
+
+    try:
+        data = json.loads(raw)
+        updates = data.get("value") or data.get("@value") or []
+    except Exception as ex:
+        log(f"  MSRC updates list error: {ex}")
+        return []
+
+    # Take the 2 most recent months
+    updates = sorted(updates, key=lambda u: u.get("CurrentReleaseDate", ""), reverse=True)[:2]
+
+    sev_map = {"critical": "CRITICAL", "important": "HIGH", "moderate": "MEDIUM", "low": "LOW"}
+    results = []
+
+    for update in updates:
+        update_id  = update.get("ID", "")
+        cvrf_url   = update.get("CvrfUrl") or f"https://api.msrc.microsoft.com/cvrf/v2.0/cvrf/{update_id}"
+        pub_date   = update.get("InitialReleaseDate", "")
+
+        raw_cvrf = http_get(cvrf_url, headers={"Accept": "application/xml"})
+        if not raw_cvrf:
+            continue
+
+        try:
+            root = ET.fromstring(raw_cvrf)
+        except ET.ParseError as ex:
+            log(f"  MSRC CVRF parse error ({update_id}): {ex}")
+            continue
+
+        # Build product name map (ProductID → display name)
+        products = {}
+        for el in root.iter():
+            if el.tag.endswith("}FullProductName") or el.tag == "FullProductName":
+                pid = el.get("ProductID", "")
+                if pid:
+                    products[pid] = (el.text or "").strip()
+
+        month_count = 0
+        for vuln in root.iter():
+            if not (vuln.tag.endswith("}Vulnerability") or vuln.tag == "Vulnerability"):
+                continue
+
+            cve_id = next(
+                (e.text for e in vuln.iter()
+                 if (e.tag.endswith("}CVE") or e.tag == "CVE") and e.text),
+                None,
+            )
+            if not cve_id or not cve_id.startswith("CVE-"):
+                continue
+
+            title = next(
+                (e.text for e in vuln.iter()
+                 if (e.tag.endswith("}Title") or e.tag == "Title") and e.text),
+                cve_id,
+            )
+
+            # CVSS score — take highest BaseScore
+            score = None
+            for e in vuln.iter():
+                if e.tag.endswith("}BaseScore") or e.tag == "BaseScore":
+                    try:
+                        score = max(score or 0, float(e.text))
+                    except (ValueError, TypeError):
+                        pass
+            if score == 0:
+                score = None
+
+            # Severity from Threat Type=3
+            sev = "UNKNOWN"
+            badge = None
+            for threat in vuln.iter():
+                if not (threat.tag.endswith("}Threat") or threat.tag == "Threat"):
+                    continue
+                t_type = threat.get("Type", "")
+                desc_el = next(
+                    (e for e in threat.iter()
+                     if e.tag.endswith("}Description") or e.tag == "Description"),
+                    None,
+                )
+                desc = (desc_el.text or "").strip().lower() if desc_el is not None else ""
+                if t_type == "3":
+                    sev = sev_map.get(desc, "UNKNOWN")
+                if t_type == "1" and ("exploited:yes" in desc or "exploitation detected" in desc or "actively exploited" in desc):
+                    badge = "ACTIVELY EXPLOITED"
+
+            if sev == "UNKNOWN" and score is not None:
+                if score >= 9.0:   sev = "CRITICAL"
+                elif score >= 7.0: sev = "HIGH"
+                elif score >= 4.0: sev = "MEDIUM"
+                else:              sev = "LOW"
+
+            # Affected products
+            affected = []
+            for ps in vuln.iter():
+                if not (ps.tag.endswith("}ProductStatuses") or ps.tag == "ProductStatuses"):
+                    continue
+                for pid_el in ps.iter():
+                    if pid_el.tag.endswith("}ProductID") or pid_el.tag == "ProductID":
+                        name = products.get(pid_el.text or "", "")
+                        if name and name not in affected:
+                            affected.append(name)
+                        if len(affected) >= 8:
+                            break
+
+            url = f"https://msrc.microsoft.com/update-guide/vulnerability/{cve_id}"
+            entry = {
+                "id": cve_id,
+                "title": title,
+                "description": f"Microsoft Security Update {update_id}: {title}",
+                "score": score,
+                "severity": sev,
+                "source": "Microsoft",
+                "published": pub_date,
+                "references": [url, f"https://nvd.nist.gov/vuln/detail/{cve_id}"],
+                "affected": affected[:8],
+                "url": url,
+            }
+            if badge:
+                entry["badge"] = badge
+            results.append(entry)
+            month_count += 1
+
+        log(f"  MSRC {update_id}: {month_count} CVEs")
+        time.sleep(1)
+
+    log(f"  MSRC total: {len(results)} CVEs")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Source: Fortinet PSIRT (public RSS)
+# ---------------------------------------------------------------------------
+
+def fetch_fortinet():
+    log("Fetching Fortinet PSIRT advisories...")
+    raw = http_get("https://filestore.fortinet.com/fortiguard/rss/ir.xml")
+    if not raw:
+        return []
+
+    cut = cutoff_utc(hours=24 * 30)
+    results = []
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as ex:
+        log(f"  Fortinet XML error: {ex}")
+        return []
+
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link  = (item.findtext("link")  or "").strip()
+        desc  = (item.findtext("description") or "").strip()
+        pub   = (item.findtext("pubDate") or "").strip()
+
+        try:
+            if parsedate_to_datetime(pub).astimezone(timezone.utc) < cut:
+                continue
+        except Exception:
+            pass
+
+        cves  = list(dict.fromkeys(re.findall(r"CVE-\d{4}-\d+", desc + " " + title)))
+        cvss_m = re.search(r"CVSS[^:]*:\s*(\d+(?:\.\d+)?)", desc, re.I)
+        score = None
+        try:
+            score = float(cvss_m.group(1)) if cvss_m else None
+        except (ValueError, TypeError):
+            pass
+
+        sev = "UNKNOWN"
+        if score is not None:
+            if score >= 9.0:   sev = "CRITICAL"
+            elif score >= 7.0: sev = "HIGH"
+            elif score >= 4.0: sev = "MEDIUM"
+            else:              sev = "LOW"
+
+        fsa_m = re.search(r"FG-IR-\d{2}-\d+", title + " " + link)
+        vid = fsa_m.group(0) if fsa_m else (cves[0] if cves else title[:60])
+
+        results.append({
+            "id": vid,
+            "title": title,
+            "description": strip_html(desc)[:600],
+            "score": score,
+            "severity": sev,
+            "source": "Fortinet",
+            "published": pub,
+            "references": [link] + [f"https://nvd.nist.gov/vuln/detail/{c}" for c in cves[:2]],
+            "affected": cves[:8],
+            "url": link,
+        })
+
+    log(f"  Fortinet: {len(results)} advisories")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Source: Juniper Security Advisories (JSA) RSS
+# ---------------------------------------------------------------------------
+
+def fetch_juniper():
+    log("Fetching Juniper Security Advisories...")
+    raw = http_get(
+        "https://kb.juniper.net/InfoCenter/index?page=rss&channel=SECURITY_ADVISORIES"
+    )
+    if not raw:
+        return []
+
+    cut = cutoff_utc(hours=24 * 30)
+    results = []
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as ex:
+        log(f"  Juniper XML error: {ex}")
+        return []
+
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link  = (item.findtext("link")  or "").strip()
+        desc  = (item.findtext("description") or "").strip()
+        pub   = (item.findtext("pubDate") or "").strip()
+
+        try:
+            if parsedate_to_datetime(pub).astimezone(timezone.utc) < cut:
+                continue
+        except Exception:
+            pass
+
+        cves  = list(dict.fromkeys(re.findall(r"CVE-\d{4}-\d+", desc + " " + title)))
+        cvss_m = re.search(r"CVSS[^:]*:\s*(\d+(?:\.\d+)?)", desc, re.I)
+        score = None
+        try:
+            score = float(cvss_m.group(1)) if cvss_m else None
+        except (ValueError, TypeError):
+            pass
+
+        sev = "UNKNOWN"
+        if score is not None:
+            if score >= 9.0:   sev = "CRITICAL"
+            elif score >= 7.0: sev = "HIGH"
+            elif score >= 4.0: sev = "MEDIUM"
+            else:              sev = "LOW"
+
+        jsa_m = re.search(r"JSA\d+", title + " " + link, re.I)
+        vid = jsa_m.group(0).upper() if jsa_m else (cves[0] if cves else title[:60])
+
+        results.append({
+            "id": vid,
+            "title": title,
+            "description": strip_html(desc)[:600],
+            "score": score,
+            "severity": sev,
+            "source": "Juniper",
+            "published": pub,
+            "references": [link] + [f"https://nvd.nist.gov/vuln/detail/{c}" for c in cves[:2]],
+            "affected": cves[:8],
+            "url": link,
+        })
+
+    log(f"  Juniper: {len(results)} advisories")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Source: OpenStack Security Notes (OSSNs)
 # ---------------------------------------------------------------------------
 
@@ -1586,6 +1862,11 @@ __VENDOR_INDEX_HTML__
     <button class="pill" data-src="Red Hat">Red Hat</button>
     <button class="pill" data-src="GitHub">GitHub</button>
     <button class="pill" data-src="OSV">OSV</button>
+    <button class="pill" data-src="Cisco">Cisco</button>
+    <button class="pill" data-src="Arista">Arista</button>
+    <button class="pill" data-src="Microsoft">Microsoft</button>
+    <button class="pill" data-src="Fortinet">Fortinet</button>
+    <button class="pill" data-src="Juniper">Juniper</button>
   </div>
   <div class="pills">
     <span class="plabel">Period:</span>
@@ -1613,6 +1894,7 @@ __VENDOR_INDEX_HTML__
     <button class="view-btn" data-view="news">Security News <span id="news-badge">0</span></button>
     <div class="sep"></div>
     <button class="view-btn" id="csvBtn" title="Download visible results as CSV">&#8595;&nbsp;CSV</button>
+    <button class="view-btn" id="shareBtn" title="Copy permalink to current filters">&#128279;&nbsp;Share</button>
   </div>
 </div>
 
@@ -2069,6 +2351,14 @@ document.getElementById("csvBtn").addEventListener("click",()=>{
   a.href=URL.createObjectURL(blob);
   a.download=`vulnfeed-${new Date().toISOString().slice(0,10)}.csv`;
   a.click();URL.revokeObjectURL(a.href);
+});
+
+document.getElementById("shareBtn").addEventListener("click",function(){
+  const btn=this;
+  navigator.clipboard.writeText(location.href).then(()=>{
+    const prev=btn.innerHTML;btn.textContent="Copied!";btn.style.color="#4ade80";
+    setTimeout(()=>{btn.innerHTML=prev;btn.style.color="";},1800);
+  }).catch(()=>prompt("Copy this link:",location.href));
 });
 
 applyHash();
@@ -2720,6 +3010,15 @@ VENDOR_PAGES = [
     ("gitlab",       "GitLab",            "gitlab"),
     ("cisco",        "Cisco",             "cisco"),
     ("arista",       "Arista",            "arista"),
+    ("microsoft",    "Microsoft",         "microsoft"),
+    ("windows",      "Windows",           "windows"),
+    ("vmware",       "VMware",            "vmware"),
+    ("fortinet",     "Fortinet",          "fortinet"),
+    ("palo-alto",    "Palo Alto",         "palo alto"),
+    ("juniper",      "Juniper",           "juniper"),
+    ("ivanti",       "Ivanti",            "ivanti"),
+    ("citrix",       "Citrix",            "citrix"),
+    ("f5",           "F5",                "f5"),
 ]
 
 _VENDOR_HTML = """\
@@ -2869,6 +3168,9 @@ def main():
     fresh += fetch_redhat()
     fresh += fetch_cisco()
     fresh += fetch_arista()
+    fresh += fetch_msrc()
+    fresh += fetch_fortinet()
+    fresh += fetch_juniper()
     fresh += fetch_openstack_ossa(months=3)
     fresh += fetch_openstack_ossn(months=3)
 

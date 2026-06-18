@@ -1668,7 +1668,7 @@ function updateSevBrk(){
 updateSevBrk();
 
 // 14-day multi-severity chart — canvas-based (no SVG fill/overflow quirks)
-(function(){
+try{(function(){
   const DAYS=14,H=64,PAD=6;
   const SERIES=[
     {sev:"CRITICAL", color:"#dc2626", label:"Critical"},
@@ -1683,15 +1683,16 @@ updateSevBrk();
     const c=Array(DAYS).fill(0);
     D_TODAY.forEach(v=>{
       if(!v._ts||SEV(v)!==s.sev)return;
-      const i=Math.floor((now-v._ts)/DAY);
-      if(i>=0&&i<DAYS)c[i]++;
+      const idx=Math.floor((now-v._ts)/DAY);
+      if(idx>=0&&idx<DAYS)c[idx]++;
     });
     s.vals=c.slice().reverse();
   });
 
   const maxV=Math.max(...SERIES.flatMap(s=>s.vals),1);
   const chartEl=document.getElementById("chart");
-  const W=chartEl.clientWidth||800;
+  if(!chartEl)return;
+  const W=chartEl.getBoundingClientRect().width||chartEl.offsetWidth||800;
   const xs=Array.from({length:DAYS},(_,i)=>PAD+(i/(DAYS-1))*(W-PAD*2));
 
   const canvas=document.createElement("canvas");
@@ -1700,23 +1701,25 @@ updateSevBrk();
   canvas.style.cssText="display:block;width:100%;height:"+H+"px";
 
   const ctx=canvas.getContext("2d");
-  SERIES.forEach(s=>{
-    const ys=s.vals.map(n=>PAD+(1-n/maxV)*(H-PAD*2));
-    ctx.strokeStyle=s.color;
-    ctx.lineWidth=1.8;
-    ctx.globalAlpha=0.85;
-    ctx.lineCap="round";
-    ctx.lineJoin="round";
-    let started=false;
-    ctx.beginPath();
-    for(let i=0;i<DAYS;i++){
-      if(s.vals[i]===0){started=false;continue;}
-      if(!started){ctx.moveTo(xs[i],ys[i]);started=true;}
-      else ctx.lineTo(xs[i],ys[i]);
-    }
-    ctx.stroke();
-    ctx.globalAlpha=1;
-  });
+  if(ctx){
+    SERIES.forEach(s=>{
+      const ys=s.vals.map(n=>PAD+(1-n/maxV)*(H-PAD*2));
+      ctx.strokeStyle=s.color;
+      ctx.lineWidth=1.8;
+      ctx.globalAlpha=0.85;
+      ctx.lineCap="round";
+      ctx.lineJoin="round";
+      let started=false;
+      ctx.beginPath();
+      for(let i=0;i<DAYS;i++){
+        if(s.vals[i]===0){started=false;continue;}
+        if(!started){ctx.moveTo(xs[i],ys[i]);started=true;}
+        else ctx.lineTo(xs[i],ys[i]);
+      }
+      ctx.stroke();
+      ctx.globalAlpha=1;
+    });
+  }
 
   const legend=SERIES.map(s=>
     `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.6rem;color:${s.color};font-weight:600">` +
@@ -1728,7 +1731,7 @@ updateSevBrk();
     '<div class="chart-lbl-row">'+labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#94a3b8;font-weight:600":""}">${l}</span>`).join("")+'</div>'+
     `<div style="display:flex;gap:.85rem;margin-top:.3rem;padding-left:${PAD}px">${legend}</div>`
   );
-})();
+})()}catch(e){console.error("chart:",e);}
 
 function hasCvePage(v){
   return v.id.startsWith("CVE-");

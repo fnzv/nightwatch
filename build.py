@@ -1126,6 +1126,9 @@ _CVE_PAGE_HTML = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
 <title>__CVE_TITLE_TAG__</title>
 <meta name="description" content="__CVE_META_DESC__">
 <meta property="og:title" content="__CVE_OG_TITLE__">
@@ -1328,6 +1331,8 @@ _HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
 <title>vulnfeed &mdash; __DATE__</title>
 <link rel="alternate" type="application/rss+xml" title="vulnfeed" href="/feed.xml">
 <meta name="description" content="vulnfeed — __COUNT__ security vulnerabilities aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack. Updated every 4 hours.">
@@ -2450,6 +2455,8 @@ _STATS_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
 <title>vulnfeed stats &mdash; __DATE__</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -2695,6 +2702,8 @@ _VENDOR_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
 <title>__VENDOR__ vulnerabilities &mdash; vulnfeed</title>
 <meta name="description" content="__COUNT__ recent vulnerabilities for __VENDOR__ aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat and more.">
 <style>

@@ -733,7 +733,7 @@ def fetch_cisco():
     if not raw:
         return []
 
-    cut = cutoff_utc(hours=24 * 14)  # 2 weeks
+    cut = cutoff_utc(hours=24 * 365)
     results = []
 
     try:
@@ -802,7 +802,7 @@ def fetch_arista():
         return []
 
     content = raw.decode("utf-8", errors="replace")
-    cut = cutoff_utc(hours=24 * 60)  # ~2 months
+    cut = cutoff_utc(hours=24 * 365)
 
     # Find advisory links: /en/support/advisories-notices/security-advisories/XXXX-XXXX-XXX.html
     links = re.findall(
@@ -817,7 +817,7 @@ def fetch_arista():
     seen = set()
     base = "https://www.arista.com"
 
-    for path, link_text in links[:30]:
+    for path, link_text in links[:100]:
         if path in seen:
             continue
         seen.add(path)
@@ -893,7 +893,7 @@ def fetch_msrc():
         return []
 
     # Take the 2 most recent months
-    updates = sorted(updates, key=lambda u: u.get("CurrentReleaseDate", ""), reverse=True)[:2]
+    updates = sorted(updates, key=lambda u: u.get("CurrentReleaseDate", ""), reverse=True)[:12]
 
     sev_map = {"critical": "CRITICAL", "important": "HIGH", "moderate": "MEDIUM", "low": "LOW"}
     results = []
@@ -1023,7 +1023,7 @@ def fetch_fortinet():
     if not raw:
         return []
 
-    cut = cutoff_utc(hours=24 * 30)
+    cut = cutoff_utc(hours=24 * 365)
     results = []
 
     try:
@@ -1091,7 +1091,7 @@ def fetch_juniper():
     if not raw:
         return []
 
-    cut = cutoff_utc(hours=24 * 30)
+    cut = cutoff_utc(hours=24 * 365)
     results = []
 
     try:

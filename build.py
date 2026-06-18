@@ -1820,6 +1820,20 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   header,#chart-wrap,.bar,.stats,#grid,#wl-panel{padding-left:1rem;padding-right:1rem}
   #grid{grid-template-columns:1fr}
 }
+#subscribe-strip{background:#0f172a;border-top:1px solid #1e293b;padding:.9rem 2rem}
+.sub-inner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;max-width:1100px;margin:0 auto}
+#subscribe-strip strong{color:#f1f5f9;font-size:.85rem}
+.sub-desc{color:#94a3b8;font-size:.78rem;margin-left:.5rem}
+.sub-form{display:flex;gap:.4rem;flex-wrap:wrap}
+.sub-form input[type=email]{padding:.38rem .75rem;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:.82rem;outline:none;width:220px}
+.sub-form input[type=email]:focus{border-color:#60a5fa}
+.sub-form input[type=email]::placeholder{color:#64748b}
+.sub-form button{padding:.38rem .9rem;border-radius:6px;background:#2563eb;color:#fff;border:none;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.sub-form button:hover{background:#1d4ed8}
+@media(max-width:640px){
+  .sub-inner{flex-direction:column;align-items:flex-start}
+  .sub-form input[type=email]{width:100%}
+}
 </style>
 </head>
 <body>
@@ -2384,6 +2398,20 @@ document.getElementById("shareBtn").addEventListener("click",function(){
 applyHash();
 applyFilters();
 </script>
+<section id="subscribe-strip">
+  <div class="sub-inner">
+    <div>
+      <strong>Weekly digest</strong>
+      <span class="sub-desc">Top CVEs of the week, every Monday. No spam.</span>
+    </div>
+    <form class="sub-form" action="https://buttondown.email/api/emails/embed-subscribe/vulnfeed"
+          method="post" target="popupwindow"
+          onsubmit="window.open('https://buttondown.email/vulnfeed','popupwindow')">
+      <input type="email" name="email" placeholder="you@company.com" required>
+      <button type="submit">Subscribe</button>
+    </form>
+  </div>
+</section>
 __STATIC_CVE_HTML__
 </body>
 </html>

@@ -326,6 +326,13 @@ def send(api_key, subject, html_body):
             return True
     except HTTPError as e:
         body = e.read().decode()
+        try:
+            err = json.loads(body)
+        except Exception:
+            err = {}
+        if err.get("code") == "email_duplicate":
+            print("[warn] Buttondown reports duplicate — email was already sent, skipping.")
+            return True
         print(f"[error] HTTP {e.code}: {body}", file=sys.stderr)
         return False
 

@@ -250,6 +250,13 @@ def fetch_nvd(hours=168):  # 7 days
                             if vendor not in ("*", "") and product not in ("*", ""):
                                 affected.add(f"{vendor}/{product}")
 
+            cwes = []
+            for weakness in cve.get("weaknesses", []):
+                for wd in weakness.get("description", []):
+                    val = wd.get("value", "")
+                    if re.match(r"^CWE-\d+$", val) and val not in cwes:
+                        cwes.append(val)
+
             results.append({
                 "id": cve_id,
                 "title": (desc[:160] if desc else cve_id),
@@ -260,6 +267,7 @@ def fetch_nvd(hours=168):  # 7 days
                 "published": cve.get("published", ""),
                 "references": refs,
                 "affected": sorted(affected)[:8],
+                "cwes": cwes[:4],
                 "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
             })
 
@@ -1566,7 +1574,8 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
     return unique
 
 
-def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None):
+def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
+                  cwe_pages=None, digest_dates=None):
     def url_entry(loc, freq, pri):
         return (
             f"  <url><loc>{loc}</loc>"
@@ -1577,8 +1586,13 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None):
 
     entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
+    entries.append(url_entry(f"{base_url}/digest/", "daily", "0.6"))
     for vp in (vendor_pages or []):
         entries.append(url_entry(f"{base_url}/vendor/{vp['slug']}.html", "daily", "0.7"))
+    for cp in (cwe_pages or []):
+        entries.append(url_entry(f"{base_url}/cwe/{cp['id']}.html", "weekly", "0.7"))
+    for d in (digest_dates or []):
+        entries.append(url_entry(f"{base_url}/digest/{d}.html", "weekly", "0.5"))
     for v in cve_pages:
         entries.append(url_entry(f"{base_url}/cve/{v['id']}.html", "weekly", "0.8"))
 
@@ -1775,6 +1789,11 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .vb-link{display:inline-flex;align-items:center;gap:.25rem;padding:.18rem .5rem;border:1px solid #334155;border-radius:12px;font-size:.68rem;font-weight:600;color:#93c5fd;text-decoration:none;background:transparent;transition:border-color .15s,background .15s}
 .vb-link:hover{border-color:#60a5fa;background:rgba(96,165,250,.1);text-decoration:none}
 .vb-link span{font-size:.6rem;color:#64748b;font-weight:400}
+#cwe-browse{padding:.4rem 2rem;border-bottom:1px solid #1e293b;background:#0c1323;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+#cwe-browse h2{font-size:.63rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;flex-shrink:0}
+.cwe-link{display:inline-flex;align-items:center;gap:.25rem;padding:.18rem .5rem;border:1px solid #312e81;border-radius:12px;font-size:.67rem;font-weight:600;color:#a5b4fc;text-decoration:none;background:transparent;transition:border-color .15s,background .15s}
+.cwe-link:hover{border-color:#818cf8;background:rgba(129,140,248,.1);text-decoration:none}
+.cwe-link span{font-size:.6rem;color:#64748b;font-weight:400}
 
 /* Watchlist */
 .card.watched{outline:2px solid #f59e0b;outline-offset:-1px}
@@ -1823,6 +1842,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 </header>
 <div id="hist-banner"></div>
 __VENDOR_INDEX_HTML__
+__CWE_INDEX_HTML__
 <div id="wl-panel">
   <span style="font-size:.72rem;color:#a8a29e;font-weight:600;white-space:nowrap">&#9733; Watchlist keywords:</span>
   <div id="wl-tags" style="display:flex;flex-wrap:wrap;gap:.3rem"></div>
@@ -3032,6 +3052,7 @@ _VENDOR_HTML = """\
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
 <title>__VENDOR__ vulnerabilities &mdash; vulnfeed</title>
 <meta name="description" content="__COUNT__ recent vulnerabilities for __VENDOR__ aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat and more.">
+<link rel="alternate" type="application/rss+xml" title="vulnfeed — __VENDOR__ vulnerabilities" href="/vendor/__SLUG__.xml">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
@@ -3126,20 +3147,415 @@ def write_vendor_pages(vulns, date_str, base_url=BASE_URL):
         ) if rows else '<div class="empty">No matching vulnerabilities found.</div>'
 
         html = _VENDOR_HTML
-        html = html.replace("__VENDOR__", _xe(display_name))
-        html = html.replace("__KEYWORD__", _xe(keyword))
-        html = html.replace("__COUNT__", str(len(matched)))
-        html = html.replace("__DATE__", date_str)
-        html = html.replace("__TABLE__", table_html)
+        html = html.replace("__VENDOR__",   _xe(display_name))
+        html = html.replace("__SLUG__",     slug)
+        html = html.replace("__KEYWORD__",  _xe(keyword))
+        html = html.replace("__COUNT__",    str(len(matched)))
+        html = html.replace("__DATE__",     date_str)
+        html = html.replace("__TABLE__",    table_html)
 
-        path = os.path.join("vendor", f"{slug}.html")
-        with open(path, "w", encoding="utf-8") as f:
+        with open(os.path.join("vendor", f"{slug}.html"), "w", encoding="utf-8") as f:
             f.write(html)
+
+        # Per-vendor RSS
+        def _xe2(s):
+            return (s or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+        now_rfc = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+        rss_items = []
+        for v in matched[:50]:
+            t = _xe2(f'[{v.get("severity","?")}] {v["id"]}: {(v.get("title") or "")[:180]}')
+            lk = _xe2(v.get("url",""))
+            ds = _xe2((v.get("description") or "")[:400])
+            pb = _rfc822(v.get("published",""))
+            rss_items.append(
+                f"  <item><title>{t}</title><link>{lk}</link>"
+                f"<description>{ds}</description><pubDate>{pb}</pubDate>"
+                f'<guid isPermaLink="false">{_xe2(v.get("url") or v["id"])}</guid></item>'
+            )
+        rss_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n<channel>\n'
+            f'<title>vulnfeed — {_xe2(display_name)} vulnerabilities</title>\n'
+            f'<link>{base_url}/vendor/{slug}.html</link>\n'
+            f'<description>Recent {_xe2(display_name)} CVEs aggregated by vulnfeed</description>\n'
+            f'<lastBuildDate>{now_rfc}</lastBuildDate>\n'
+            f'<atom:link href="{base_url}/vendor/{slug}.xml" rel="self" type="application/rss+xml"/>\n'
+            + "\n".join(rss_items)
+            + "\n</channel>\n</rss>"
+        )
+        with open(os.path.join("vendor", f"{slug}.xml"), "w", encoding="utf-8") as f:
+            f.write(rss_xml)
 
         pages.append({"slug": slug, "display_name": display_name, "count": len(matched)})
 
-    log(f"  Written: {len(pages)} vendor pages → vendor/")
+    log(f"  Written: {len(pages)} vendor pages + RSS → vendor/")
     return pages
+
+
+# ---------------------------------------------------------------------------
+# CWE category pages
+# ---------------------------------------------------------------------------
+
+CWE_PAGES = [
+    # (cwe_id, display_name, keyword)
+    ("CWE-89",  "SQL Injection",                     "sql injection"),
+    ("CWE-79",  "Cross-Site Scripting (XSS)",         "cross-site scripting"),
+    ("CWE-78",  "OS Command Injection",               "command injection"),
+    ("CWE-22",  "Path Traversal",                    "path traversal"),
+    ("CWE-787", "Out-of-bounds Write",                "out-of-bounds write"),
+    ("CWE-125", "Out-of-bounds Read",                 "out-of-bounds read"),
+    ("CWE-416", "Use After Free",                    "use after free"),
+    ("CWE-94",  "Code Injection",                    "code injection"),
+    ("CWE-502", "Deserialization",                   "deserialization"),
+    ("CWE-611", "XML External Entity (XXE)",          "xxe"),
+    ("CWE-918", "Server-Side Request Forgery (SSRF)", "ssrf"),
+    ("CWE-352", "Cross-Site Request Forgery (CSRF)",  "csrf"),
+    ("CWE-190", "Integer Overflow",                  "integer overflow"),
+    ("CWE-476", "NULL Pointer Dereference",           "null pointer dereference"),
+    ("CWE-269", "Privilege Escalation",              "privilege escalat"),
+    ("CWE-306", "Missing Authentication",            "missing authentication"),
+    ("CWE-20",  "Improper Input Validation",         "input validation"),
+    ("CWE-119", "Buffer Overflow",                   "buffer overflow"),
+    ("CWE-798", "Hardcoded Credentials",             "hardcoded"),
+    ("CWE-434", "Unrestricted File Upload",          "file upload"),
+]
+
+_CWE_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>__CWE_ID__: __CWE_NAME__ CVEs &mdash; vulnfeed</title>
+<meta name="description" content="__COUNT__ CVEs matching __CWE_ID__ (__CWE_NAME__) aggregated from NVD, CISA KEV, Red Hat and more. Updated __DATE__.">
+<link rel="canonical" href="__BASE_URL__/cwe/__CWE_ID__.html">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+.wrap{max-width:1100px;margin:0 auto;padding:2rem}
+h1{font-size:1.35rem;font-weight:800;margin-bottom:.25rem}
+.cwe-badge{display:inline-block;background:#6366f1;color:#fff;border-radius:4px;padding:.1rem .4rem;font-size:.75rem;font-family:ui-monospace,monospace;font-weight:700;margin-right:.4rem}
+.sub{font-size:.8rem;color:var(--muted);margin-bottom:1.75rem}.sub a{color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:#f8fafc}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+.cve-id{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.cve-id:hover{text-decoration:underline}
+.sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
+.sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+.src-tag{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}
+.ttl{font-size:.78rem;color:var(--text)}
+.empty{text-align:center;padding:4rem 2rem;color:var(--muted)}
+@media(max-width:640px){.wrap{padding:1rem}th:nth-child(4),td:nth-child(4),th:nth-child(6),td:nth-child(6){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <a class="hlink" href="/#q=__CWE_ID__">Search feed</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1><span class="cwe-badge">__CWE_ID__</span> __CWE_NAME__ vulnerabilities</h1>
+  <p class="sub">__COUNT__ CVEs &mdash; updated __DATE__ &middot; <a href="/">vulnfeed</a></p>
+  __TABLE__
+</div>
+</body>
+</html>
+"""
+
+
+def write_cwe_pages(vulns, date_str, base_url=BASE_URL):
+    os.makedirs("cwe", exist_ok=True)
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    pages = []
+
+    for cwe_id, display_name, keyword in CWE_PAGES:
+        kw = keyword.lower()
+        matched = [
+            v for v in vulns
+            if cwe_id in (v.get("cwes") or []) or
+               kw in " ".join([v.get("title", ""), v.get("description", "")]).lower()
+        ]
+        seen_ids: set = set()
+        deduped = []
+        for v in matched:
+            if v["id"] not in seen_ids:
+                seen_ids.add(v["id"])
+                deduped.append(v)
+        matched = sorted(deduped, key=lambda v: (
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)))
+
+        if not matched:
+            continue
+
+        rows = []
+        for v in matched:
+            sev = v.get("severity", "UNKNOWN")
+            sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+            epss_str = f'{v["epss_pct"]:.0f}%ile' if v.get("epss_pct") is not None else "—"
+            pub = (v.get("published") or "")[:10]
+            ttl = _xe((v.get("title") or v["id"])[:120])
+            url = _xe(v.get("url", ""))
+            rows.append(
+                f'<tr>'
+                f'<td><a class="cve-id" href="{url}" target="_blank" rel="noopener">{_xe(v["id"])}</a></td>'
+                f'<td class="ttl">{ttl}</td>'
+                f'<td><span class="sev s{sev}">{sev}</span></td>'
+                f'<td>{sc_str}</td><td>{epss_str}</td>'
+                f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+                f'<td>{pub}</td></tr>'
+            )
+
+        table_html = (
+            '<table><tr><th>CVE / ID</th><th>Title</th><th>Severity</th>'
+            '<th>CVSS</th><th>EPSS</th><th>Source</th><th>Date</th></tr>'
+            + "".join(rows) + '</table>'
+        ) if rows else '<div class="empty">No matching vulnerabilities found.</div>'
+
+        html = _CWE_HTML
+        html = html.replace("__CWE_ID__",   cwe_id)
+        html = html.replace("__CWE_NAME__",  _xe(display_name))
+        html = html.replace("__COUNT__",     str(len(matched)))
+        html = html.replace("__DATE__",      date_str)
+        html = html.replace("__TABLE__",     table_html)
+        html = html.replace("__BASE_URL__",  base_url)
+
+        with open(os.path.join("cwe", f"{cwe_id}.html"), "w", encoding="utf-8") as f:
+            f.write(html)
+
+        pages.append({"id": cwe_id, "display_name": display_name, "count": len(matched)})
+
+    log(f"  Written: {len(pages)} CWE pages → cwe/")
+    return pages
+
+
+# ---------------------------------------------------------------------------
+# Daily digest pages
+# ---------------------------------------------------------------------------
+
+_DIGEST_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>Security Vulnerability Digest &mdash; __DATE__ | vulnfeed</title>
+<meta name="description" content="__TOTAL__ vulnerabilities tracked on __DATE__: __N_CRIT__ critical, __N_HIGH__ high severity. Daily CVE digest by vulnfeed.">
+<link rel="canonical" href="__BASE_URL__/digest/__DATE__.html">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+.wrap{max-width:1100px;margin:0 auto;padding:2rem}
+h1{font-size:1.4rem;font-weight:800;margin-bottom:.25rem}
+h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:2rem 0 .75rem}
+.date-nav{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;font-size:.8rem}
+.date-nav a{color:var(--accent);text-decoration:none;font-weight:600}.date-nav a:hover{text-decoration:underline}
+.date-nav strong{color:var(--text)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;margin-bottom:2rem}
+.stat-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.stat-val{font-size:1.8rem;font-weight:800;letter-spacing:-.04em}
+.stat-lbl{font-size:.72rem;color:var(--muted);margin-top:.1rem}
+.crit-val{color:var(--crit)}.high-val{color:var(--high)}.expl-val{color:#7c3aed}
+table{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:2rem}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:#f8fafc}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+.cve-id{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.cve-id:hover{text-decoration:underline}
+.sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
+.sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+.src-tag{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}
+.ttl{font-size:.78rem;color:var(--text)}
+@media(max-width:640px){.wrap{padding:1rem}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">Live feed</a>
+    <a class="hlink" href="/digest/">All digests</a>
+  </div>
+</header>
+<div class="wrap">
+  <div class="date-nav">
+    __PREV_LINK__
+    <strong>__DATE__</strong>
+    __NEXT_LINK__
+  </div>
+  <h1>Security Digest &mdash; __DATE__</h1>
+  <div class="stat-grid">
+    <div class="stat-box"><div class="stat-val">__TOTAL__</div><div class="stat-lbl">Total vulnerabilities</div></div>
+    <div class="stat-box"><div class="stat-val crit-val">__N_CRIT__</div><div class="stat-lbl">Critical</div></div>
+    <div class="stat-box"><div class="stat-val high-val">__N_HIGH__</div><div class="stat-lbl">High</div></div>
+    <div class="stat-box"><div class="stat-val expl-val">__N_EXPL__</div><div class="stat-lbl">Actively exploited</div></div>
+  </div>
+  <h2>Top vulnerabilities</h2>
+  __TOP_TABLE__
+</div>
+</body>
+</html>
+"""
+
+_DIGEST_INDEX_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>Daily Security Digest Archive | vulnfeed</title>
+<meta name="description" content="Archive of daily security vulnerability digests aggregated from NVD, CISA KEV, Microsoft, Fortinet, Juniper and more.">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.wrap{max-width:800px;margin:0 auto;padding:2rem}
+h1{font-size:1.35rem;font-weight:800;margin-bottom:.5rem}
+.sub{font-size:.8rem;color:var(--muted);margin-bottom:2rem}
+.digest-list{list-style:none;display:grid;gap:.5rem}
+.digest-list li a{display:flex;align-items:center;justify-content:space-between;padding:.65rem 1rem;background:var(--card);border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:.85rem;transition:border-color .15s}
+.digest-list li a:hover{border-color:var(--accent)}
+.digest-list li a span{font-size:.72rem;color:var(--muted);font-weight:400}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">vuln<em>feed</em></div>
+  <a class="hlink" href="/">&#8592; Live feed</a>
+</header>
+<div class="wrap">
+  <h1>Daily Security Digest</h1>
+  <p class="sub">Daily snapshots of vulnerabilities tracked by vulnfeed.</p>
+  <ul class="digest-list">__DIGEST_LINKS__</ul>
+</div>
+</body>
+</html>
+"""
+
+
+def _write_single_digest(vulns, date_str, all_dates, base_url=BASE_URL):
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    sev_counts = {}
+    exploited = 0
+    for v in vulns:
+        s = v.get("severity", "UNKNOWN")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
+        if v.get("badge") == "ACTIVELY EXPLOITED":
+            exploited += 1
+
+    top = sorted(vulns, key=lambda v: (
+        SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)))[:40]
+
+    rows = []
+    for v in top:
+        sev = v.get("severity", "UNKNOWN")
+        sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+        pub = (v.get("published") or "")[:10]
+        ttl = _xe((v.get("title") or v["id"])[:120])
+        url = _xe(v.get("url", ""))
+        rows.append(
+            f'<tr><td><a class="cve-id" href="{url}" target="_blank" rel="noopener">{_xe(v["id"])}</a></td>'
+            f'<td class="ttl">{ttl}</td>'
+            f'<td><span class="sev s{sev}">{sev}</span></td>'
+            f'<td>{sc_str}</td>'
+            f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+            f'<td>{pub}</td></tr>'
+        )
+
+    table_html = (
+        '<table><tr><th>CVE / ID</th><th>Title</th><th>Severity</th>'
+        '<th>CVSS</th><th>Source</th><th>Date</th></tr>'
+        + "".join(rows) + '</table>'
+    ) if rows else '<p style="color:#64748b">No data for this date.</p>'
+
+    idx = all_dates.index(date_str) if date_str in all_dates else -1
+    prev_date = all_dates[idx + 1] if idx >= 0 and idx + 1 < len(all_dates) else None
+    next_date = all_dates[idx - 1] if idx > 0 else None
+
+    prev_link = f'<a href="/digest/{prev_date}.html">&#8592; {prev_date}</a>' if prev_date else ""
+    next_link = f'<a href="/digest/{next_date}.html">{next_date} &#8594;</a>' if next_date else ""
+
+    html = _DIGEST_HTML
+    html = html.replace("__DATE__",      date_str)
+    html = html.replace("__TOTAL__",     str(len(vulns)))
+    html = html.replace("__N_CRIT__",    str(sev_counts.get("CRITICAL", 0)))
+    html = html.replace("__N_HIGH__",    str(sev_counts.get("HIGH", 0)))
+    html = html.replace("__N_EXPL__",    str(exploited))
+    html = html.replace("__TOP_TABLE__", table_html)
+    html = html.replace("__PREV_LINK__", prev_link)
+    html = html.replace("__NEXT_LINK__", next_link)
+    html = html.replace("__BASE_URL__",  base_url)
+
+    with open(os.path.join("digest", f"{date_str}.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def write_digest_pages(fresh, date_str, hist_dates, base_url=BASE_URL):
+    os.makedirs("digest", exist_ok=True)
+    all_dates = sorted({date_str} | set(hist_dates), reverse=True)
+
+    # Today's digest
+    _write_single_digest(fresh, date_str, all_dates, base_url)
+
+    # Backfill historical dates not yet written
+    for hist_date in hist_dates:
+        digest_path = os.path.join("digest", f"{hist_date}.html")
+        if os.path.exists(digest_path):
+            continue
+        hist_path = os.path.join(HISTORICAL_DIR, f"{hist_date}.json")
+        if not os.path.exists(hist_path):
+            continue
+        try:
+            with open(hist_path, encoding="utf-8") as hf:
+                hist_vulns = json.load(hf)
+            _write_single_digest(hist_vulns, hist_date, all_dates, base_url)
+        except Exception as ex:
+            log(f"  Digest backfill error ({hist_date}): {ex}")
+
+    # Index page
+    existing = sorted(
+        [f[:-5] for f in os.listdir("digest")
+         if re.match(r"^\d{4}-\d{2}-\d{2}\.html$", f)],
+        reverse=True,
+    )
+    links = "".join(
+        f'<li><a href="/digest/{d}.html">{d}<span>daily digest</span></a></li>'
+        for d in existing
+    )
+    idx_html = _DIGEST_INDEX_HTML.replace("__DIGEST_LINKS__", links)
+    with open(os.path.join("digest", "index.html"), "w", encoding="utf-8") as f:
+        f.write(idx_html)
+
+    log(f"  Written: {len(existing)} digest pages → digest/")
+    return existing
 
 
 # ---------------------------------------------------------------------------
@@ -3243,7 +3659,12 @@ def main():
     write_stats_page(vulns, date_str)
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
-    write_sitemap(cve_pages, date_str, vendor_pages=vendor_pages)
+    log("Writing CWE pages...")
+    cwe_pages = write_cwe_pages(vulns, date_str)
+    log("Writing digest pages...")
+    digest_dates = write_digest_pages(fresh, date_str, hist_dates)
+    write_sitemap(cve_pages, date_str, vendor_pages=vendor_pages,
+                  cwe_pages=cwe_pages, digest_dates=digest_dates)
 
     # --- Static HTML for SEO pre-render ---
     critical_ids = {v["id"] for v in cve_pages}
@@ -3284,6 +3705,18 @@ def main():
         + '</div></section>'
     )
 
+    cwe_index_html = (
+        '<section id="cwe-browse">'
+        '<h2>Browse by weakness</h2>'
+        '<div class="vb-grid">'
+        + "".join(
+            f'<a class="cwe-link" href="/cwe/{_xe(p["id"])}.html">'
+            f'{_xe(p["display_name"])} <span>{p["count"]}</span></a>'
+            for p in cwe_pages
+        )
+        + '</div></section>'
+    )
+
     json_blob     = json.dumps(vulns,         ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     news_blob     = json.dumps(news,          ensure_ascii=False, separators=(",", ":"))
     dates_blob    = json.dumps(hist_dates)
@@ -3297,6 +3730,7 @@ def main():
     html = html.replace("__NEWS_JSON__",         news_blob)
     html = html.replace("__HEALTH__",            health_blob)
     html = html.replace("__VENDOR_INDEX_HTML__", vendor_index_html)
+    html = html.replace("__CWE_INDEX_HTML__",    cwe_index_html)
     html = html.replace("__STATIC_CVE_HTML__",   static_html)
 
     out = "index.html"

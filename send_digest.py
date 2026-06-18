@@ -41,7 +41,8 @@ VENDOR_GROUPS = [
 
 # Sources that are authoritative for a given vendor (used to restrict noisy keyword matches)
 VENDOR_AUTHORITATIVE_SOURCES = {
-    "kubernetes": {"kubernetes"},  # only official k8s advisory feed
+    "kubernetes":   {"kubernetes"},           # only official k8s advisory feed
+    "linux-kernel": {"ubuntu", "debian"},     # only distro security advisories, not random NVD noise
 }
 
 
@@ -174,6 +175,10 @@ def build_email_html(vulns, week_end):
                                        ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"])
     osp_section  = vendor_mini_section("OpenStack",   "openstack",   vulns,
                                        ["openstack", "nova", "neutron", "keystone", "cinder", "glance"])
+    # Only Ubuntu/Debian advisories for kernel — NVD is full of noise (smb, batman-adv, etc.)
+    kernel_vulns  = [v for v in vulns if v.get("source", "").lower() in {"ubuntu", "debian"}]
+    kernel_section = vendor_mini_section("Linux Kernel", "linux-kernel", kernel_vulns,
+                                        ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"])
 
     return f"""<!DOCTYPE html>
 <html>
@@ -204,6 +209,9 @@ def build_email_html(vulns, week_end):
 
     <!-- openstack -->
     {osp_section}
+
+    <!-- linux kernel -->
+    {kernel_section}
 
     <p style="margin:1.6rem 0 0;font-size:.82rem;color:#64748b;text-align:center;border-top:1px solid #e2e8f0;padding-top:1rem">
       <a href="{digest_url}" style="color:#2563eb;font-weight:600;text-decoration:none">Full digest &rarr;</a>

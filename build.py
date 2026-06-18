@@ -1473,8 +1473,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 
 #chart-wrap{background:var(--hdr);padding:.6rem 2rem .7rem;border-bottom:1px solid #1e293b}
 #chart-title{font-size:.65rem;color:#475569;margin-bottom:.55rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-#chart{position:relative;height:64px}
-#chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#chart{height:64px;overflow:hidden}
 .chart-lbl-row{display:flex;margin-top:3px}
 .chart-lbl-row span{flex:1;text-align:center;font-size:.6rem;color:#334155}
 
@@ -1668,9 +1667,9 @@ function updateSevBrk(){
 }
 updateSevBrk();
 
-// 14-day multi-severity chart (always live data)
+// 14-day multi-severity chart — canvas-based (no SVG fill/overflow quirks)
 (function(){
-  const DAYS=14,VW=600,VH=64,PAD=6;
+  const DAYS=14,H=64,PAD=6;
   const SERIES=[
     {sev:"CRITICAL", color:"#dc2626", label:"Critical"},
     {sev:"HIGH",     color:"#ea580c", label:"High"},
@@ -1679,7 +1678,6 @@ updateSevBrk();
   const labels=Array.from({length:DAYS},(_,i)=>
     new Date(now-(DAYS-1-i)*DAY).toLocaleDateString(undefined,{weekday:"short"})
   );
-  const xs=Array.from({length:DAYS},(_,i)=>PAD+(i/(DAYS-1))*(VW-PAD*2));
 
   SERIES.forEach(s=>{
     const c=Array(DAYS).fill(0);
@@ -1692,26 +1690,44 @@ updateSevBrk();
   });
 
   const maxV=Math.max(...SERIES.flatMap(s=>s.vals),1);
+  const chartEl=document.getElementById("chart");
+  const W=chartEl.clientWidth||800;
+  const xs=Array.from({length:DAYS},(_,i)=>PAD+(i/(DAYS-1))*(W-PAD*2));
 
-  // Use <line> elements — unlike <path>, <line> has no fill concept at all
-  let segs="";
+  const canvas=document.createElement("canvas");
+  canvas.width=W;
+  canvas.height=H;
+  canvas.style.cssText="display:block;width:100%;height:"+H+"px";
+
+  const ctx=canvas.getContext("2d");
   SERIES.forEach(s=>{
-    const ys=s.vals.map(n=>PAD+(1-n/maxV)*(VH-PAD*2));
-    for(let i=0;i<DAYS-1;i++){
-      if(s.vals[i]===0||s.vals[i+1]===0)continue;
-      segs+=`<line x1="${xs[i].toFixed(1)}" y1="${ys[i].toFixed(1)}" x2="${xs[i+1].toFixed(1)}" y2="${ys[i+1].toFixed(1)}" stroke="${s.color}" stroke-width="1.8" stroke-opacity="0.85" stroke-linecap="round"/>`;
+    const ys=s.vals.map(n=>PAD+(1-n/maxV)*(H-PAD*2));
+    ctx.strokeStyle=s.color;
+    ctx.lineWidth=1.8;
+    ctx.globalAlpha=0.85;
+    ctx.lineCap="round";
+    ctx.lineJoin="round";
+    let started=false;
+    ctx.beginPath();
+    for(let i=0;i<DAYS;i++){
+      if(s.vals[i]===0){started=false;continue;}
+      if(!started){ctx.moveTo(xs[i],ys[i]);started=true;}
+      else ctx.lineTo(xs[i],ys[i]);
     }
+    ctx.stroke();
+    ctx.globalAlpha=1;
   });
 
   const legend=SERIES.map(s=>
-    `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.6rem;color:${s.color};font-weight:600">
-      <svg width="14" height="3" viewBox="0 0 14 3"><line x1="0" y1="1.5" x2="14" y2="1.5" stroke="${s.color}" stroke-width="2"/></svg>${s.label}</span>`
+    `<span style="display:inline-flex;align-items:center;gap:.3rem;font-size:.6rem;color:${s.color};font-weight:600">` +
+    `<span style="display:inline-block;width:14px;height:2px;background:${s.color};border-radius:1px;opacity:.85"></span>${s.label}</span>`
   ).join("");
 
-  document.getElementById("chart").innerHTML=
-    `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">${segs}</svg>`+
+  chartEl.appendChild(canvas);
+  chartEl.insertAdjacentHTML("beforeend",
     '<div class="chart-lbl-row">'+labels.map((l,i)=>`<span style="${i===DAYS-1?"color:#94a3b8;font-weight:600":""}">${l}</span>`).join("")+'</div>'+
-    `<div style="display:flex;gap:.85rem;margin-top:.3rem;padding-left:${PAD}px">${legend}</div>`;
+    `<div style="display:flex;gap:.85rem;margin-top:.3rem;padding-left:${PAD}px">${legend}</div>`
+  );
 })();
 
 function hasCvePage(v){

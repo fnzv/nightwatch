@@ -1494,6 +1494,13 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #seo-index li a{color:var(--accent);font-family:ui-monospace,monospace;font-size:.7rem;font-weight:600}
 #seo-index small{color:#94a3b8;margin-left:.25rem}
 
+#vendor-browse{padding:1.25rem 2rem 1.75rem;border-top:1px solid var(--border)}
+#vendor-browse h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.75rem}
+.vb-grid{display:flex;flex-wrap:wrap;gap:.45rem}
+.vb-link{display:inline-flex;align-items:center;gap:.35rem;padding:.28rem .65rem;border:1px solid var(--border);border-radius:20px;font-size:.75rem;font-weight:600;color:var(--accent);text-decoration:none;background:var(--card);transition:border-color .15s,background .15s}
+.vb-link:hover{border-color:var(--accent);background:#eff6ff;text-decoration:none}
+.vb-link span{font-size:.65rem;color:var(--muted);font-weight:400}
+
 /* Watchlist */
 .card.watched{outline:2px solid #f59e0b;outline-offset:-1px}
 .bwl{background:#f59e0b;color:#1e293b!important}
@@ -2047,6 +2054,7 @@ document.getElementById("csvBtn").addEventListener("click",()=>{
 applyHash();
 applyFilters();
 </script>
+__VENDOR_INDEX_HTML__
 __STATIC_CVE_HTML__
 </body>
 </html>
@@ -2943,19 +2951,32 @@ def main():
         "</section>"
     )
 
+    vendor_index_html = (
+        '<section id="vendor-browse">'
+        '<h2>Browse by product</h2>'
+        '<div class="vb-grid">'
+        + "".join(
+            f'<a class="vb-link" href="/vendor/{_xe(p["slug"])}.html">'
+            f'{_xe(p["display_name"])} <span>{p["count"]}</span></a>'
+            for p in vendor_pages
+        )
+        + '</div></section>'
+    )
+
     json_blob     = json.dumps(vulns,         ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     news_blob     = json.dumps(news,          ensure_ascii=False, separators=(",", ":"))
     dates_blob    = json.dumps(hist_dates)
     health_blob   = json.dumps(source_counts)
 
     html = _HTML
-    html = html.replace("__DATE__",            date_str)
-    html = html.replace("__COUNT__",           str(len(vulns)))
-    html = html.replace("__JSON__",            json_blob)
-    html = html.replace("__DATES_JSON__",      dates_blob)
-    html = html.replace("__NEWS_JSON__",       news_blob)
-    html = html.replace("__HEALTH__",          health_blob)
-    html = html.replace("__STATIC_CVE_HTML__", static_html)
+    html = html.replace("__DATE__",              date_str)
+    html = html.replace("__COUNT__",             str(len(vulns)))
+    html = html.replace("__JSON__",              json_blob)
+    html = html.replace("__DATES_JSON__",        dates_blob)
+    html = html.replace("__NEWS_JSON__",         news_blob)
+    html = html.replace("__HEALTH__",            health_blob)
+    html = html.replace("__VENDOR_INDEX_HTML__", vendor_index_html)
+    html = html.replace("__STATIC_CVE_HTML__",   static_html)
 
     out = "index.html"
     with open(out, "w", encoding="utf-8") as f:

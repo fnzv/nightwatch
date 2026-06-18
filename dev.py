@@ -75,6 +75,18 @@ static_html = (
     "</section>"
 )
 
+vendor_index_html = (
+    '<section id="vendor-browse">'
+    '<h2>Browse by product</h2>'
+    '<div class="vb-grid">'
+    + "".join(
+        f'<a class="vb-link" href="/vendor/{p["slug"]}.html">'
+        f'{p["display_name"]} <span>{p["count"]}</span></a>'
+        for p in vendor_pages
+    )
+    + '</div></section>'
+)
+
 json_blob    = json.dumps(vulns,      ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 news_blob    = json.dumps(news,       ensure_ascii=False, separators=(",", ":"))
 dates_blob   = json.dumps(hist_dates)
@@ -85,13 +97,14 @@ for v in vulns:
 health_blob  = json.dumps(source_counts)
 
 html = _HTML
-html = html.replace("__DATE__",            date_str)
-html = html.replace("__COUNT__",           str(len(vulns)))
-html = html.replace("__JSON__",            json_blob)
-html = html.replace("__DATES_JSON__",      dates_blob)
-html = html.replace("__NEWS_JSON__",       news_blob)
-html = html.replace("__HEALTH__",          health_blob)
-html = html.replace("__STATIC_CVE_HTML__", static_html)
+html = html.replace("__DATE__",              date_str)
+html = html.replace("__COUNT__",             str(len(vulns)))
+html = html.replace("__JSON__",              json_blob)
+html = html.replace("__DATES_JSON__",        dates_blob)
+html = html.replace("__NEWS_JSON__",         news_blob)
+html = html.replace("__HEALTH__",            health_blob)
+html = html.replace("__VENDOR_INDEX_HTML__", vendor_index_html)
+html = html.replace("__STATIC_CVE_HTML__",   static_html)
 
 with open("index.html", "w", encoding="utf-8") as f:
     f.write(html)

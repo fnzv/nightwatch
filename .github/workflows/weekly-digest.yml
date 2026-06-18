@@ -18,7 +18,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Send weekly digest
+      - name: Send weekly digest (all CVEs)
         env:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
         run: python3 send_digest.py
+
+      - name: Send infrastructure digest (Kubernetes / OpenStack / Kernel / nginx)
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+        run: python3 send_digest.py --vendors

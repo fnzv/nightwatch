@@ -4,8 +4,10 @@ Weekly digest emailer — reads last 7 days of historical snapshots,
 picks top CVEs by severity/EPSS, and sends via Buttondown API.
 
 Usage:
-    BUTTONDOWN_API_KEY=<key> python3 send_digest.py
-    BUTTONDOWN_API_KEY=<key> python3 send_digest.py --dry-run   # print HTML, don't send
+    BUTTONDOWN_API_KEY=<key> python3 send_digest.py              # general top-20 digest
+    BUTTONDOWN_API_KEY=<key> python3 send_digest.py --vendors    # infra vendor digest
+    BUTTONDOWN_API_KEY=<key> python3 send_digest.py --dry-run    # print HTML, don't send
+    BUTTONDOWN_API_KEY=<key> python3 send_digest.py --vendors --dry-run
 """
 import json
 import os
@@ -27,6 +29,15 @@ SEV_COLOR = {
     "LOW":      "#16a34a",
     "UNKNOWN":  "#6b7280",
 }
+
+# Vendor groups for the infrastructure digest.
+# Each entry: (display_name, slug, [keywords])  — any keyword match → included.
+VENDOR_GROUPS = [
+    ("Kubernetes",    "kubernetes",   ["kubernetes", "k8s", "etcd", "kubectl", "kubelet"]),
+    ("OpenStack",     "openstack",    ["openstack", "nova", "neutron", "keystone", "cinder", "glance"]),
+    ("Linux Kernel",  "linux-kernel", ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"]),
+    ("nginx / Traefik", "nginx-traefik", ["nginx", "traefik"]),
+]
 
 
 def load_week():
@@ -185,6 +196,114 @@ def build_email_html(vulns, week_end):
 </html>"""
 
 
+def match_vendor(v, keywords):
+    haystack = " ".join([
+        v.get("id", ""), v.get("title", ""), v.get("description", ""),
+        *v.get("affected", []),
+    ]).lower()
+    return any(kw in haystack for kw in keywords)
+
+
+def build_vendor_section(display_name, slug, vulns, keywords):
+    """Return an HTML section string for one vendor group (up to 10 CVEs)."""
+    matched = sorted(
+        [v for v in vulns if match_vendor(v, keywords)],
+        key=lambda v: (SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)),
+    )[:10]
+
+    if not matched:
+        return ""
+
+    rows = ""
+    for v in matched:
+        sev   = v.get("severity", "UNKNOWN")
+        color = SEV_COLOR.get(sev, "#6b7280")
+        score = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+        epss  = f'{v["epss"] * 100:.1f}%' if v.get("epss") else "—"
+        kev   = ' <span style="color:#7c3aed;font-weight:700;font-size:.7rem">KEV</span>' if v.get("kev") else ""
+        url   = f"{BASE_URL}/cve/{v['id']}.html"
+        title = xe((v.get("title") or "")[:110])
+        rows += (
+            f'<tr>'
+            f'<td style="padding:.45rem .7rem;border-bottom:1px solid #e2e8f0;white-space:nowrap">'
+            f'<a href="{url}" style="color:#2563eb;font-family:monospace;font-weight:700;font-size:.78rem;text-decoration:none">'
+            f'{xe(v["id"])}</a></td>'
+            f'<td style="padding:.45rem .7rem;border-bottom:1px solid #e2e8f0">'
+            f'<span style="background:{color};color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:700;text-transform:uppercase">{xe(sev)}</span>'
+            f'</td>'
+            f'<td style="padding:.45rem .7rem;border-bottom:1px solid #e2e8f0;font-size:.77rem;color:#1e293b">{title}{kev}</td>'
+            f'<td style="padding:.45rem .7rem;border-bottom:1px solid #e2e8f0;font-size:.77rem;color:#475569;text-align:right;white-space:nowrap">{xe(score)}</td>'
+            f'<td style="padding:.45rem .7rem;border-bottom:1px solid #e2e8f0;font-size:.77rem;color:#7c3aed;text-align:right;white-space:nowrap">{xe(epss)}</td>'
+            f'</tr>'
+        )
+
+    vendor_url = f"{BASE_URL}/vendor/{slug}.html"
+    return (
+        f'<div style="font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;'
+        f'letter-spacing:.08em;margin:1.75rem 0 .6rem">'
+        f'<a href="{vendor_url}" style="color:#2563eb;text-decoration:none">{xe(display_name)}</a>'
+        f' &mdash; {len(matched)} CVE{"s" if len(matched) != 1 else ""}</div>'
+        f'<table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:.5rem">'
+        f'<thead><tr style="background:#f8fafc">'
+        f'<th style="text-align:left;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">CVE</th>'
+        f'<th style="text-align:left;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Sev</th>'
+        f'<th style="text-align:left;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Description</th>'
+        f'<th style="text-align:right;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">CVSS</th>'
+        f'<th style="text-align:right;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em">EPSS</th>'
+        f'</tr></thead>'
+        f'<tbody>{rows}</tbody></table>'
+    )
+
+
+def build_vendor_email_html(vulns, week_end):
+    """Build a combined infrastructure digest email with per-product sections."""
+    sections = ""
+    total_matched = 0
+    for display_name, slug, keywords in VENDOR_GROUPS:
+        section = build_vendor_section(display_name, slug, vulns, keywords)
+        if section:
+            sections += section
+            total_matched += sum(1 for v in vulns if match_vendor(v, keywords))
+
+    if not sections:
+        return None, 0
+
+    digest_url = f"{BASE_URL}/digest/{week_end}.html"
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;margin:0;padding:0">
+<div style="max-width:700px;margin:0 auto;padding:2rem 1rem">
+
+  <div style="background:#0f172a;padding:1.2rem 1.8rem;border-radius:10px 10px 0 0">
+    <span style="font-size:1.3rem;font-weight:800;color:#f1f5f9">vuln<span style="color:#60a5fa">feed</span></span>
+    <span style="font-size:.75rem;color:#94a3b8;margin-left:1rem">Infrastructure Digest &mdash; {xe(week_end)}</span>
+  </div>
+
+  <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:1.5rem 1.8rem">
+    <p style="font-size:.84rem;color:#475569;margin:0 0 .25rem">
+      Vulnerabilities affecting <strong style="color:#0f172a">Kubernetes, OpenStack, Linux Kernel, nginx &amp; Traefik</strong>
+      from the past 7 days.
+    </p>
+    {sections}
+    <p style="margin:1.5rem 0 0;font-size:.82rem;color:#64748b;text-align:center">
+      <a href="{digest_url}" style="color:#2563eb;font-weight:600;text-decoration:none">Full digest &rarr;</a>
+      &nbsp;&middot;&nbsp;
+      <a href="{BASE_URL}/" style="color:#2563eb;font-weight:600;text-decoration:none">Live feed</a>
+    </p>
+  </div>
+
+  <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-top:none;padding:.75rem 1.8rem;
+              border-radius:0 0 10px 10px;text-align:center">
+    <span style="font-size:.7rem;color:#94a3b8">
+      vulnfeed infrastructure digest. <a href="{{{{ unsubscribe_url }}}}" style="color:#94a3b8">Unsubscribe</a>
+    </span>
+  </div>
+</div>
+</body>
+</html>""", total_matched
+
+
 def send(api_key, subject, html_body):
     payload = json.dumps({
         "subject": subject,
@@ -211,7 +330,8 @@ def send(api_key, subject, html_body):
 
 
 def main():
-    dry_run = "--dry-run" in sys.argv
+    dry_run      = "--dry-run" in sys.argv
+    vendor_mode  = "--vendors" in sys.argv
 
     api_key = os.environ.get("BUTTONDOWN_API_KEY")
     if not api_key and not dry_run:
@@ -223,17 +343,28 @@ def main():
         print("[error] No historical data found — run build.py at least once", file=sys.stderr)
         sys.exit(1)
 
-    n_crit = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
-    subject = f"vulnfeed weekly: {len(vulns)} CVEs · {n_crit} critical — {week_end}"
-    html_body = build_email_html(vulns, week_end)
-
     print(f"[digest] {len(vulns)} vulns from last 7 days, week ending {week_end}")
+
+    if vendor_mode:
+        html_body, n_matched = build_vendor_email_html(vulns, week_end)
+        if not html_body:
+            print("[vendors] No CVEs matched any vendor group — skipping")
+            return
+        subject = f"vulnfeed infra digest: Kubernetes · OpenStack · Kernel · nginx — {week_end}"
+        print(f"[vendors] {n_matched} CVEs across {len(VENDOR_GROUPS)} vendor groups")
+        preview_path = "/tmp/digest_vendors_preview.html"
+    else:
+        n_crit = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
+        subject = f"vulnfeed weekly: {len(vulns)} CVEs · {n_crit} critical — {week_end}"
+        html_body = build_email_html(vulns, week_end)
+        preview_path = "/tmp/digest_preview.html"
+
     print(f"[digest] Subject: {subject}")
 
     if dry_run:
-        with open("/tmp/digest_preview.html", "w", encoding="utf-8") as f:
+        with open(preview_path, "w", encoding="utf-8") as f:
             f.write(html_body)
-        print("[dry-run] HTML written to /tmp/digest_preview.html")
+        print(f"[dry-run] HTML written to {preview_path}")
         return
 
     ok = send(api_key, subject, html_body)

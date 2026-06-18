@@ -316,6 +316,7 @@ def send(api_key, subject, html_body):
         headers={
             "Authorization": f"Token {api_key}",
             "Content-Type": "application/json",
+            "X-Buttondown-Live-Dangerously": "true",
         },
     )
     try:

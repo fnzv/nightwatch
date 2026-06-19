@@ -142,10 +142,11 @@ def cve_card(v):
     )
 
 
-def vendor_mini_section(display_name, slug, vulns, keywords, n=5, title_only=False):
+def vendor_mini_section(display_name, slug, vulns, keywords, n=5, title_only=False, score_idx=None):
     """Top N CVEs for a vendor as a compact block. Returns empty string if no matches."""
+    pool = [enrich(v, score_idx) for v in vulns] if score_idx else vulns
     matched = sorted(
-        [v for v in vulns if match_vendor(v, keywords, title_only=title_only)],
+        [v for v in pool if match_vendor(v, keywords, title_only=title_only)],
         key=lambda v: (
             0 if v.get("kev") else 1,
             SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
@@ -168,6 +169,7 @@ def vendor_mini_section(display_name, slug, vulns, keywords, n=5, title_only=Fal
 
 
 def build_email_html(vulns, week_end):
+    score_idx  = build_score_index(vulns)
     tldr       = build_tldr(vulns, week_end)
     highlights = top_cves(vulns, TOP_N)
     digest_url = f"{BASE_URL}/digest/{week_end}.html"
@@ -177,17 +179,20 @@ def build_email_html(vulns, week_end):
     # Only official Kubernetes CVEs (source=Kubernetes) to avoid Azure/Fission/golang noise
     k8s_vulns    = [v for v in vulns if v.get("source", "").lower() == "kubernetes"]
     k8s_section  = vendor_mini_section("Kubernetes",  "kubernetes",  k8s_vulns,
-                                       ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"])
+                                       ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"],
+                                       score_idx=score_idx)
     osp_vulns    = [v for v in vulns if v.get("source", "").lower() in {"openstack", "oss-security"}]
     osp_section  = vendor_mini_section("OpenStack",   "openstack",   osp_vulns,
-                                       ["openstack", "nova", "neutron", "keystone", "cinder", "glance", "ironic", "cyborg"])
+                                       ["openstack", "nova", "neutron", "keystone", "cinder", "glance", "ironic", "cyborg"],
+                                       score_idx=score_idx)
     # Only Ubuntu/Debian advisories for kernel — NVD is full of noise (smb, batman-adv, etc.)
     kernel_vulns   = [v for v in vulns if v.get("source", "").lower() in {"ubuntu", "debian"}]
     kernel_section = vendor_mini_section("Linux Kernel", "linux-kernel", kernel_vulns,
-                                         ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"])
+                                         ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"],
+                                         score_idx=score_idx)
     # nginx/Traefik: title-only match to avoid Apache, TLS noise
     nginx_section  = vendor_mini_section("nginx / Traefik", "nginx-traefik", vulns,
-                                         ["nginx", "traefik"], title_only=True)
+                                         ["nginx", "traefik"], title_only=True, score_idx=score_idx)
 
     return f"""<!DOCTYPE html>
 <html>
@@ -247,6 +252,32 @@ def build_email_html(vulns, week_end):
 </html>"""
 
 
+def build_score_index(vulns):
+    """Return {cve_id: best_entry} using the highest-scoring version across all sources."""
+    idx = {}
+    for v in vulns:
+        vid = v["id"]
+        if not vid.startswith("CVE-"):
+            continue
+        if vid not in idx or (v.get("score") or 0) > (idx[vid].get("score") or 0):
+            idx[vid] = v
+    return idx
+
+
+def enrich(v, score_idx):
+    """Return v with score/severity/epss/kev filled from the best known entry for that CVE."""
+    if v.get("score") is not None and v.get("severity") not in (None, "UNKNOWN"):
+        return v
+    best = score_idx.get(v["id"])
+    if not best:
+        return v
+    merged = dict(v)
+    for field in ("score", "severity", "epss", "kev", "epss_pct", "badge"):
+        if merged.get(field) in (None, "UNKNOWN", "") and best.get(field) not in (None, "UNKNOWN", ""):
+            merged[field] = best[field]
+    return merged
+
+
 def match_vendor(v, keywords, title_only=False):
     if title_only:
         haystack = (v.get("title") or "").lower()
@@ -258,11 +289,16 @@ def match_vendor(v, keywords, title_only=False):
     return any(kw in haystack for kw in keywords)
 
 
-def build_vendor_section(display_name, slug, vulns, keywords, title_only=False):
+def build_vendor_section(display_name, slug, vulns, keywords, title_only=False, score_idx=None):
     """Return an HTML section string for one vendor group (up to 10 CVEs)."""
+    pool = [enrich(v, score_idx) for v in vulns] if score_idx else vulns
     matched = sorted(
-        [v for v in vulns if match_vendor(v, keywords, title_only=title_only)],
-        key=lambda v: (SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)),
+        [v for v in pool if match_vendor(v, keywords, title_only=title_only)],
+        key=lambda v: (
+            0 if v.get("kev") else 1,
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
+            -(v.get("score") or 0),
+        ),
     )[:10]
 
     if not matched:
@@ -311,13 +347,15 @@ def build_vendor_section(display_name, slug, vulns, keywords, title_only=False):
 
 def build_vendor_email_html(vulns, week_end):
     """Build a combined infrastructure digest email with per-product sections."""
+    score_idx = build_score_index(vulns)
     sections = ""
     total_matched = 0
     for display_name, slug, keywords in VENDOR_GROUPS:
         allowed_sources = VENDOR_AUTHORITATIVE_SOURCES.get(slug)
         pool = [v for v in vulns if v.get("source", "").lower() in allowed_sources] if allowed_sources else vulns
         title_only = slug in VENDOR_TITLE_ONLY
-        section = build_vendor_section(display_name, slug, pool, keywords, title_only=title_only)
+        section = build_vendor_section(display_name, slug, pool, keywords,
+                                       title_only=title_only, score_idx=score_idx)
         if section:
             sections += section
             total_matched += sum(1 for v in vulns if match_vendor(v, keywords))

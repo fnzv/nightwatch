@@ -1443,34 +1443,35 @@ def enrich_with_nvd(vulns):
 
 
 # ---------------------------------------------------------------------------
-# Patch status — OSV.dev batch query
+# Patch status — OSV.dev per-CVE lookup
 # ---------------------------------------------------------------------------
 
+def _osv_has_fix(data):
+    """True if an OSV vuln record has at least one fixed version event."""
+    return any(
+        "fixed" in evt
+        for aff in data.get("affected", [])
+        for rng in aff.get("ranges", [])
+        for evt in rng.get("events", [])
+    )
+
+
 def fetch_patch_status(cve_ids):
-    """Return {cve_id: True} for CVEs with a known fix via OSV.dev."""
+    """Return {cve_id: True/False} via OSV.dev GET /v1/vulns/{id}.
+    Capped at 200 IDs per run to keep build time reasonable."""
     if not cve_ids:
         return {}
-    ids = list(cve_ids)
+    ids = list(cve_ids)[:200]
     log(f"  Patch status: querying OSV for {len(ids)} CVEs...")
     result = {}
-    for i in range(0, len(ids), 500):
-        batch = ids[i : i + 500]
-        payload = json.dumps({"queries": [{"id": {"type": "CVE", "id": cid}} for cid in batch]})
-        raw = http_post("https://api.osv.dev/v1/querybatch", payload)
-        if not raw:
-            continue
+    for cid in ids:
+        raw = http_get(f"https://api.osv.dev/v1/vulns/{cid}")
+        if raw is None:
+            continue          # 404 = not in OSV, skip
         try:
-            data = json.loads(raw)
+            result[cid] = _osv_has_fix(json.loads(raw))
         except Exception:
-            continue
-        for cid, res in zip(batch, data.get("results", [])):
-            result[cid] = any(
-                "fixed" in evt
-                for vuln in res.get("vulns", [])
-                for aff in vuln.get("affected", [])
-                for rng in aff.get("ranges", [])
-                for evt in rng.get("events", [])
-            )
+            pass
     patched = sum(1 for v in result.values() if v)
     log(f"  Patch status: {patched}/{len(result)} have a fix")
     return result

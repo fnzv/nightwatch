@@ -1518,6 +1518,33 @@ def fetch_patch_status(cve_ids):
     return result
 
 
+def fetch_poc_status(cve_ids):
+    """Check nomi-sec/PoC-in-GitHub for public PoC availability.
+    Queries raw.githubusercontent.com (no auth needed, CDN-backed).
+    404 = no PoC; 200 = PoC repo file exists."""
+    if not cve_ids:
+        return set()
+    ids = list(cve_ids)[:200]
+    log(f"  PoC check: querying {len(ids)} CVEs via nomi-sec/PoC-in-GitHub...")
+    has_poc = set()
+    ua = {"User-Agent": "tldr-security-aggregator/1.0"}
+    for cid in ids:
+        m = re.match(r"CVE-(\d{4})-", cid)
+        if not m:
+            continue
+        year = m.group(1)
+        url = f"https://raw.githubusercontent.com/nomi-sec/PoC-in-GitHub/master/{year}/{cid}.json"
+        try:
+            req = Request(url, headers=ua)
+            with urlopen(req, timeout=10) as r:
+                if r.status == 200:
+                    has_poc.add(cid)
+        except Exception:
+            pass  # 404 or network error = no PoC, silently skip
+    log(f"  PoC check: {len(has_poc)}/{len(ids)} have public PoCs")
+    return has_poc
+
+
 # ---------------------------------------------------------------------------
 # Individual CVE page template
 # ---------------------------------------------------------------------------
@@ -1558,6 +1585,7 @@ main{max-width:820px;margin:2rem auto;padding:0 1.5rem 4rem}
 .bMEDIUM{background:#d97706}.bLOW{background:#16a34a}.bUNKNOWN{background:#6b7280}
 .bscore{background:#1e293b;font-family:ui-monospace,monospace}
 .bsrc{background:#334155}.bkev{background:#7c3aed}
+.bpatch{background:#166534}.bnopatch{background:#7f1d1d}.bpoc{background:#dc2626}
 h1{font-size:1.55rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.4rem;line-height:1.25}
 .subtitle{font-size:.98rem;color:#475569;margin-bottom:1.3rem;font-weight:500}
 .desc-box{background:#fff;border:1px solid #e2e8f0;border-radius:10px;
@@ -1653,6 +1681,12 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         badges_html += f' <span class="b bsrc">{_xe(src)}</span>'
         if badge:
             badges_html += f' <span class="b bkev">{_xe(badge)}</span>'
+        if v.get("patch") is True:
+            badges_html += ' <span class="b bpatch">PATCH ✓</span>'
+        elif v.get("patch") is False:
+            badges_html += ' <span class="b bnopatch">NO FIX</span>'
+        if v.get("poc"):
+            badges_html += ' <span class="b bpoc" title="Public proof-of-concept exploit exists on GitHub">PoC</span>'
 
         if aff:
             aff_html = "  <h2>Affected Products</h2><ul class='aff-list'>" + \
@@ -1862,6 +1896,8 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .btrend{background:#f59e0b;color:#000;font-size:.62rem}
 .bpatch{background:#166534;font-size:.62rem}
 .bnopatch{background:#7f1d1d;font-size:.62rem}
+.bpoc{background:#dc2626;font-size:.62rem}
+.bunread{background:#4f46e5;font-size:.62rem}
 .fix-cmd{display:flex;align-items:center;gap:.4rem;margin-top:.3rem;background:#0c1221;
   border:1px solid #1e3a5f;border-radius:5px;padding:.28rem .55rem;overflow:hidden}
 .fix-cmd code{font-family:ui-monospace,monospace;font-size:.72rem;color:#86efac;
@@ -2097,6 +2133,11 @@ const HEALTH=__HEALTH__;
 D.forEach(v=>{v._ts=v.published?new Date(v.published).getTime()||0:0});
 NEWS.forEach(n=>{n._ts=n.published?new Date(n.published).getTime()||0:0});
 
+// "New since last visit" — mark items published after the user's previous session
+const _lastVisit=parseInt(localStorage.getItem("vf_lastVisit")||"0");
+if(_lastVisit>0){D.forEach(v=>{if(v._ts&&v._ts>_lastVisit)v._unread=true;});}
+setTimeout(()=>localStorage.setItem("vf_lastVisit",String(Date.now())),2000);
+
 const SEV=v=>v.severity||"UNKNOWN";
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function host(u){try{return new URL(u).hostname}catch(_){return String(u).slice(0,30)}}
@@ -2225,6 +2266,8 @@ function card(v){
   const nw=v._new?`<span class="b bnew">NEW</span>`:"";
   const tr=v._trending?`<span class="b btrend" title="EPSS jumped >5pp in 24h — active exploitation likely">TRENDING</span>`:"";
   const pt=v.patch===true?`<span class="b bpatch">PATCH ✓</span>`:v.patch===false?`<span class="b bnopatch">NO FIX</span>`:"";
+  const pc=v.poc?`<span class="b bpoc" title="Public proof-of-concept exploit exists on GitHub">PoC</span>`:"";
+  const ur=v._unread?`<span class="b bunread" title="New since your last visit">UNREAD</span>`:"";
   const wl=isWatched(v)?`<span class="b bwl">&#9733;</span>`:"";
   const aff=(v.affected||[]).slice(0,6).map(a=>`<span class="chip">${esc(a)}</span>`).join("");
   const rfs=(v.references||[]).filter(Boolean).slice(0,3).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`).join(" &middot; ");
@@ -2235,7 +2278,7 @@ function card(v){
   const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
   const watchedCls=isWatched(v)?" watched":"";
-  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${nw}${tr}${sc}${sv}${sr}${ep}${xp}${pt}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${fixHtml}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${ur}${nw}${tr}${pc}${sc}${sv}${sr}${ep}${xp}${pt}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${fixHtml}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){
@@ -3848,6 +3891,21 @@ def main():
     for v in vulns:
         if v["id"] in patch_map:
             v["patch"] = patch_map[v["id"]]
+
+    # --- PoC availability via nomi-sec/PoC-in-GitHub ---
+    log("Checking PoC availability...")
+    epss_by_id = {v["id"]: v.get("epss") or 0 for v in vulns}
+    epss_sorted_cves = sorted(
+        [vid for vid in epss_by_id if vid.startswith("CVE-")],
+        key=lambda cid: epss_by_id[cid],
+        reverse=True,
+    )[:200]
+    poc_set = fetch_poc_status(epss_sorted_cves)
+    for v in vulns:
+        if v["id"] in poc_set:
+            v["poc"] = True
+    poc_count = sum(1 for v in vulns if v.get("poc"))
+    log(f"  PoC available: {poc_count}")
 
     # --- Vendor fix commands: propagate from advisories to CVE entries ---
     # Ubuntu/Debian advisories have USN/DSA ids and carry fix cmds; Red Hat entries

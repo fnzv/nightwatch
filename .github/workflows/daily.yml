@@ -36,6 +36,8 @@ jobs:
           python-version: '3.11'
 
       - name: Build digest
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: python3 build.py
 
       - name: Commit historical snapshot

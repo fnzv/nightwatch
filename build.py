@@ -181,6 +181,27 @@ def fetch_github_advisories(days=7):
 # Source: NVD
 # ---------------------------------------------------------------------------
 
+def _parse_nvd_metrics(cve):
+    """Return (score, severity) from an NVD CVE dict."""
+    score, severity = None, "UNKNOWN"
+    metrics = cve.get("metrics", {})
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30"):
+        entries = metrics.get(key, [])
+        if entries:
+            cd = entries[0].get("cvssData", {})
+            score = cd.get("baseScore")
+            severity = (cd.get("baseSeverity") or "UNKNOWN").upper()
+            break
+    if score is None:
+        for entry in metrics.get("cvssMetricV2", []):
+            s = entry.get("cvssData", {}).get("baseScore")
+            if s is not None:
+                score = s
+                severity = "HIGH" if s >= 7 else ("MEDIUM" if s >= 4 else "LOW")
+                break
+    return score, severity
+
+
 def fetch_nvd(hours=168):  # 7 days
     log("Fetching NVD CVEs (last 24 h)...")
     now = datetime.now(timezone.utc)
@@ -221,22 +242,7 @@ def fetch_nvd(hours=168):  # 7 days
                 ""
             )
 
-            score, severity = None, "UNKNOWN"
-            metrics = cve.get("metrics", {})
-            for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30"):
-                entries = metrics.get(key, [])
-                if entries:
-                    cd = entries[0].get("cvssData", {})
-                    score = cd.get("baseScore")
-                    severity = (cd.get("baseSeverity") or "UNKNOWN").upper()
-                    break
-            if score is None:
-                for entry in metrics.get("cvssMetricV2", []):
-                    s = entry.get("cvssData", {}).get("baseScore")
-                    if s is not None:
-                        score = s
-                        severity = "HIGH" if s >= 7 else ("MEDIUM" if s >= 4 else "LOW")
-                        break
+            score, severity = _parse_nvd_metrics(cve)
 
             refs = [r["url"] for r in cve.get("references", [])[:5] if r.get("url")]
 
@@ -1401,6 +1407,76 @@ def merge(vulns):
 
 
 # ---------------------------------------------------------------------------
+# NVD enrichment — fill in missing CVSS for Ubuntu/Debian/OpenStack CVEs
+# ---------------------------------------------------------------------------
+
+def enrich_with_nvd(vulns):
+    """Query NVD by CVE ID for entries that still have no CVSS score.
+    Requires NVD_API_KEY env var; skips silently without one."""
+    api_key = os.environ.get("NVD_API_KEY")
+    if not api_key:
+        return
+    unscored = [v for v in vulns if v.get("score") is None and v["id"].startswith("CVE-")]
+    if not unscored:
+        return
+    log(f"  NVD enrichment: {len(unscored)} unscored CVEs...")
+    hdrs = {"apiKey": api_key}
+    enriched = 0
+    for v in unscored:
+        raw = http_get(
+            f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={v['id']}",
+            headers=hdrs,
+        )
+        if not raw:
+            continue
+        try:
+            items = json.loads(raw).get("vulnerabilities", [])
+            if items:
+                score, sev = _parse_nvd_metrics(items[0].get("cve", {}))
+                if score is not None:
+                    v["score"] = score
+                    v["severity"] = sev
+                    enriched += 1
+        except Exception:
+            pass
+    log(f"  NVD enrichment: {enriched}/{len(unscored)} scored")
+
+
+# ---------------------------------------------------------------------------
+# Patch status — OSV.dev batch query
+# ---------------------------------------------------------------------------
+
+def fetch_patch_status(cve_ids):
+    """Return {cve_id: True} for CVEs with a known fix via OSV.dev."""
+    if not cve_ids:
+        return {}
+    ids = list(cve_ids)
+    log(f"  Patch status: querying OSV for {len(ids)} CVEs...")
+    result = {}
+    for i in range(0, len(ids), 500):
+        batch = ids[i : i + 500]
+        payload = json.dumps({"queries": [{"id": {"type": "CVE", "id": cid}} for cid in batch]})
+        raw = http_post("https://api.osv.dev/v1/querybatch", payload)
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        for cid, res in zip(batch, data.get("results", [])):
+            result[cid] = any(
+                "fixed" in evt
+                for vuln in res.get("vulns", [])
+                for aff in vuln.get("affected", [])
+                for rng in aff.get("ranges", [])
+                for evt in rng.get("events", [])
+            )
+    patched = sum(1 for v in result.values() if v)
+    log(f"  Patch status: {patched}/{len(result)} have a fix")
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Individual CVE page template
 # ---------------------------------------------------------------------------
 
@@ -1719,6 +1795,9 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .bepss{background:#0d9488;font-size:.62rem}
 .bnew{background:#059669;animation:npulse 2s ease-in-out infinite}
 @keyframes npulse{0%,100%{opacity:1}50%{opacity:.6}}
+.btrend{background:#f59e0b;color:#000;font-size:.62rem}
+.bpatch{background:#166534;font-size:.62rem}
+.bnopatch{background:#7f1d1d;font-size:.62rem}
 .src-dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-left:3px;vertical-align:middle;flex-shrink:0}
 
 .ctitle{font-size:.85rem;font-weight:600;line-height:1.4}
@@ -2073,6 +2152,8 @@ function card(v){
   const xp=v.badge?`<span class="b bxpl">${esc(v.badge)}</span>`:"";
   const ep=v.epss!=null?`<span class="b bepss" title="EPSS score: ${(v.epss*100).toFixed(2)}% probability of exploitation">EPSS ${v.epss_pct}%ile</span>`:"";
   const nw=v._new?`<span class="b bnew">NEW</span>`:"";
+  const tr=v._trending?`<span class="b btrend" title="EPSS jumped >5pp in 24h — active exploitation likely">TRENDING</span>`:"";
+  const pt=v.patch===true?`<span class="b bpatch">PATCH ✓</span>`:v.patch===false?`<span class="b bnopatch">NO FIX</span>`:"";
   const wl=isWatched(v)?`<span class="b bwl">&#9733;</span>`:"";
   const aff=(v.affected||[]).slice(0,6).map(a=>`<span class="chip">${esc(a)}</span>`).join("");
   const rfs=(v.references||[]).filter(Boolean).slice(0,3).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`).join(" &middot; ");
@@ -2082,7 +2163,7 @@ function card(v){
   const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
   const watchedCls=isWatched(v)?" watched":"";
-  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${nw}${sc}${sv}${sr}${ep}${xp}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${nw}${tr}${sc}${sv}${sr}${ep}${xp}${pt}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){
@@ -3620,7 +3701,19 @@ def main():
 
     log(f"Fresh total: {len(fresh)}")
 
-    # --- Persist today's snapshot + build historical index ---
+    # --- EPSS annotation on fresh (stored in snapshot for trending delta) ---
+    log("Annotating EPSS scores...")
+    epss_data = fetch_epss()
+    epss_hits = 0
+    for v in fresh:
+        ep = epss_data.get(v["id"])
+        if ep:
+            v["epss"] = round(ep["epss"], 4)
+            v["epss_pct"] = round(ep["percentile"] * 100, 1)
+            epss_hits += 1
+    log(f"  EPSS annotations (fresh): {epss_hits}/{len(fresh)}")
+
+    # --- Persist today's snapshot (includes EPSS for future trending delta) ---
     log("Saving historical snapshot...")
     save_historical(fresh, date_str)
     log("Building historical index...")
@@ -3634,36 +3727,55 @@ def main():
     vulns = merge(fresh + historical)
     log(f"After dedup/merge: {len(vulns)}")
 
-    # --- Diff vs yesterday ---
+    # Fill EPSS on any historical entries that lacked it (older snapshots)
+    for v in vulns:
+        if v.get("epss") is None:
+            ep = epss_data.get(v["id"])
+            if ep:
+                v["epss"] = round(ep["epss"], 4)
+                v["epss_pct"] = round(ep["percentile"] * 100, 1)
+
+    # --- Diff vs yesterday + EPSS trending ---
     yesterday_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     yesterday_path = os.path.join(HISTORICAL_DIR, f"{yesterday_str}.json")
     yesterday_ids = set()
+    yesterday_epss = {}   # {cve_id: epss_score} from yesterday's snapshot
     if os.path.exists(yesterday_path):
         try:
             with open(yesterday_path, encoding="utf-8") as f:
-                yesterday_ids = {v["id"] for v in json.load(f)}
-            log(f"Yesterday snapshot: {len(yesterday_ids)} IDs")
+                yday = json.load(f)
+            yesterday_ids = {v["id"] for v in yday}
+            yesterday_epss = {v["id"]: v["epss"] for v in yday if v.get("epss") is not None}
+            log(f"Yesterday snapshot: {len(yesterday_ids)} IDs, {len(yesterday_epss)} EPSS")
         except Exception as ex:
             log(f"  Error loading yesterday: {ex}")
 
     fresh_ids = {v["id"] for v in fresh}
+    trending_count = 0
     for v in vulns:
         if v["id"] in fresh_ids and v["id"] not in yesterday_ids:
             v["_new"] = True
+        # Trending: EPSS jumped >5pp since yesterday (rapid exploitation escalation)
+        cur_epss = v.get("epss")
+        prev_epss = yesterday_epss.get(v["id"])
+        if cur_epss is not None and prev_epss is not None:
+            if (cur_epss - prev_epss) >= 0.05 and cur_epss >= 0.01:
+                v["_trending"] = True
+                trending_count += 1
     new_count = sum(1 for v in vulns if v.get("_new"))
-    log(f"New since yesterday: {new_count}")
+    log(f"New since yesterday: {new_count}  |  Trending (EPSS +5pp): {trending_count}")
 
-    # --- EPSS annotation ---
-    log("Annotating EPSS scores...")
-    epss_data = fetch_epss()
-    epss_hits = 0
+    # --- NVD enrichment for unscored CVEs (needs NVD_API_KEY) ---
+    log("NVD enrichment for unscored CVEs...")
+    enrich_with_nvd(vulns)
+
+    # --- Patch status via OSV.dev (fresh CVEs only to limit API calls) ---
+    log("Fetching patch status...")
+    fresh_cve_ids = [v["id"] for v in fresh if v["id"].startswith("CVE-")]
+    patch_map = fetch_patch_status(fresh_cve_ids)
     for v in vulns:
-        ep = epss_data.get(v["id"])
-        if ep:
-            v["epss"] = round(ep["epss"], 4)
-            v["epss_pct"] = round(ep["percentile"] * 100, 1)
-            epss_hits += 1
-    log(f"  EPSS annotations: {epss_hits}/{len(vulns)}")
+        if v["id"] in patch_map:
+            v["patch"] = patch_map[v["id"]]
 
     # --- Source health (per-source counts from fresh fetch) ---
     source_counts = {}

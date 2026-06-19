@@ -320,6 +320,19 @@ def fetch_ubuntu():
 
         cves = re.findall(r"CVE-\d{4}-\d+", desc + " " + title)
 
+        # Extract package name(s) from title: "USN-1234-1: openssl, curl vulnerabilities"
+        fix_cmd = None
+        if ":" in title:
+            pkg_text = title.split(":", 1)[1].strip()
+            pkg_text = re.sub(r"\s+vulnerabilit(?:y|ies)\s*$", "", pkg_text, flags=re.IGNORECASE)
+            pkg_text = re.sub(r"\s*\([^)]+\)", "", pkg_text).strip()  # remove (OEM), (Azure)…
+            if pkg_text:
+                # Split "openssl, curl" → ["openssl", "curl"], hyphenate multi-word names
+                parts = re.split(r",\s*|\s+and\s+", pkg_text)
+                parts = [re.sub(r"\s+", "-", p.strip().lower()) for p in parts if p.strip()]
+                if parts:
+                    fix_cmd = f"sudo apt install --only-upgrade {' '.join(parts)}"
+
         results.append({
             "id": (title.split(":")[0] if ":" in title else title).strip(),
             "title": title,
@@ -331,6 +344,7 @@ def fetch_ubuntu():
             "references": [link],
             "affected": list(dict.fromkeys(cves))[:8],
             "url": link,
+            "fix": fix_cmd,
         })
 
     log(f"  Ubuntu: {len(results)} advisories")
@@ -386,6 +400,15 @@ def fetch_debian():
         dsa_id = dsa_m.group(0).strip("[]") if dsa_m else subject.split()[0]
         msg_url = base + href
 
+        # Extract package name: "[SECURITY] [DSA 6344-1] chromium security update"
+        fix_cmd = None
+        pkg_m = re.search(r"\[DSA[^\]]+\]\s+(.+?)(?:\s+(?:security )?update)?\s*$",
+                          subject, re.IGNORECASE)
+        if pkg_m:
+            pkg = pkg_m.group(1).strip().lower()
+            if pkg:
+                fix_cmd = f"sudo apt install --only-upgrade {pkg}"
+
         results.append({
             "id": dsa_id,
             "title": subject.strip(),
@@ -397,6 +420,7 @@ def fetch_debian():
             "references": [msg_url],
             "affected": list(dict.fromkeys(cves))[:8],
             "url": msg_url,
+            "fix": fix_cmd,
         })
 
         time.sleep(0.5)  # polite crawling
@@ -709,10 +733,26 @@ def fetch_redhat(days=7):
 
         # Affected packages from advisories
         affected = []
+        pkg_base_names = []
         for rel in (item.get("affected_release") or [])[:6]:
             pkg = rel.get("package", "")
             if pkg:
                 affected.append(pkg)
+                # Strip arch then extract name: "runc-1.1.12-1.el9.x86_64" → "runc"
+                p = re.sub(r"\.(x86_64|noarch|i686|aarch64|s390x|ppc64le)$", "", pkg)
+                parts = p.split("-")
+                name_parts = []
+                for part in parts:
+                    if re.match(r"^\d[\d\.]*$", part):  # pure version like "1.1.12"
+                        break
+                    name_parts.append(part)
+                base = "-".join(name_parts) if name_parts else parts[0]
+                if base and base not in pkg_base_names:
+                    pkg_base_names.append(base)
+
+        fix_cmd = None
+        if pkg_base_names:
+            fix_cmd = f"sudo dnf update {' '.join(pkg_base_names[:3])}"
 
         rhsa_refs = []
         for rhsa in (item.get("advisories") or [])[:3]:
@@ -731,6 +771,7 @@ def fetch_redhat(days=7):
             "references": [f"https://access.redhat.com/security/cve/{cve_id}"] + rhsa_refs,
             "affected": list(dict.fromkeys(affected))[:8],
             "url": f"https://access.redhat.com/security/cve/{cve_id}",
+            "fix": fix_cmd,
         })
 
     log(f"  Red Hat: {len(results)} CVEs")
@@ -1535,6 +1576,15 @@ ul.aff-list li{font-family:ui-monospace,monospace;font-size:.82rem;background:#f
 .cta{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
   padding:.85rem 1.1rem;margin-top:1.4rem;font-size:.88rem;color:#1e3a8a;line-height:1.5}
 .cta a{color:#2563eb;font-weight:600}
+.fix-box{background:#0c1221;border:1px solid #1e3a5f;border-radius:8px;
+  padding:.85rem 1.1rem;margin-top:1.1rem}
+.fix-box h2{font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;
+  letter-spacing:.07em;margin-bottom:.55rem}
+.fix-box code{font-family:ui-monospace,monospace;font-size:.9rem;color:#86efac;display:block;
+  word-break:break-all}
+.fix-box button{margin-top:.55rem;background:none;border:1px solid #1e3a5f;color:#64748b;
+  border-radius:4px;padding:.2rem .6rem;font-size:.78rem;cursor:pointer}
+.fix-box button:hover{color:#86efac;border-color:#86efac}
 </style>
 </head>
 <body>
@@ -1548,6 +1598,7 @@ ul.aff-list li{font-family:ui-monospace,monospace;font-size:.82rem;background:#f
   <p class="subtitle">__CVE_TITLE_ESC__</p>
   <div class="desc-box">__CVE_DESC_ESC__</div>
 __CVE_AFFECTED_HTML__
+__CVE_FIX_HTML__
 __CVE_REFS_HTML__
   <div class="meta-line">
     Published: <strong>__CVE_DATE__</strong> &middot;
@@ -1616,6 +1667,17 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         else:
             refs_html = ""
 
+        fix_cmd = v.get("fix") or ""
+        if fix_cmd:
+            fix_html = (
+                f'  <div class="fix-box"><h2>Remediation</h2>'
+                f'<code>$ {_xe(fix_cmd)}</code>'
+                f'<button onclick="navigator.clipboard.writeText({json.dumps(fix_cmd)})'
+                f'.then(()=>{{this.textContent=\'✓ Copied\';setTimeout(()=>this.textContent=\'Copy command\',1500)}})">Copy command</button></div>'
+            )
+        else:
+            fix_html = ""
+
         ld = {
             "@context": "https://schema.org",
             "@type": "Article",
@@ -1637,6 +1699,7 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         page = page.replace("__CVE_TITLE_ESC__",       _xe(title))
         page = page.replace("__CVE_DESC_ESC__",        _xe(desc))
         page = page.replace("__CVE_AFFECTED_HTML__",   aff_html)
+        page = page.replace("__CVE_FIX_HTML__",        fix_html)
         page = page.replace("__CVE_REFS_HTML__",       refs_html)
         page = page.replace("__CVE_DATE__",            pub_fmt)
         page = page.replace("__CVE_SRC_ESC__",         _xe(src))
@@ -1799,6 +1862,13 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .btrend{background:#f59e0b;color:#000;font-size:.62rem}
 .bpatch{background:#166534;font-size:.62rem}
 .bnopatch{background:#7f1d1d;font-size:.62rem}
+.fix-cmd{display:flex;align-items:center;gap:.4rem;margin-top:.3rem;background:#0c1221;
+  border:1px solid #1e3a5f;border-radius:5px;padding:.28rem .55rem;overflow:hidden}
+.fix-cmd code{font-family:ui-monospace,monospace;font-size:.72rem;color:#86efac;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.fix-copy{background:none;border:1px solid #1e3a5f;color:#64748b;border-radius:3px;
+  padding:.06rem .28rem;font-size:.63rem;cursor:pointer;flex-shrink:0;white-space:nowrap}
+.fix-copy:hover{color:#86efac;border-color:#86efac}
 .src-dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-left:3px;vertical-align:middle;flex-shrink:0}
 
 .ctitle{font-size:.85rem;font-weight:600;line-height:1.4}
@@ -2161,10 +2231,11 @@ function card(v){
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
   const dsc=v.description?`<div class="cdesc">${esc(v.description)}</div>`:"";
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
+  const fixHtml=v.fix?`<div class="fix-cmd"><code>$ ${esc(v.fix)}</code><button class="fix-copy" onclick="event.stopPropagation();navigator.clipboard.writeText(${JSON.stringify(v.fix)}).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='copy',1500)})">copy</button></div>`:"";
   const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
   const watchedCls=isWatched(v)?" watched":"";
-  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${nw}${tr}${sc}${sv}${sr}${ep}${xp}${pt}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}</div><div class="bdgs">${wl}${nw}${tr}${sc}${sv}${sr}${ep}${xp}${pt}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${fixHtml}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){
@@ -3777,6 +3848,26 @@ def main():
     for v in vulns:
         if v["id"] in patch_map:
             v["patch"] = patch_map[v["id"]]
+
+    # --- Vendor fix commands: propagate from advisories to CVE entries ---
+    # Ubuntu/Debian advisories have USN/DSA ids and carry fix cmds; Red Hat entries
+    # already have CVE ids. Build an index so NVD/GitHub CVE cards also show the fix.
+    fix_index = {}
+    for v in fresh:
+        fc = v.get("fix")
+        if not fc:
+            continue
+        if v["id"].startswith("CVE-"):
+            fix_index.setdefault(v["id"], fc)
+        else:
+            for cve_ref in v.get("affected", []):
+                if cve_ref.startswith("CVE-"):
+                    fix_index.setdefault(cve_ref, fc)
+    for v in vulns:
+        if not v.get("fix") and v["id"] in fix_index:
+            v["fix"] = fix_index[v["id"]]
+    fix_count = sum(1 for v in vulns if v.get("fix"))
+    log(f"  Fix commands available: {fix_count}")
 
     # --- Source health (per-source counts from fresh fetch) ---
     source_counts = {}

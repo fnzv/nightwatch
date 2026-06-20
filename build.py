@@ -4125,8 +4125,12 @@ def main():
         + '</div></section>'
     )
 
-    json_blob     = json.dumps(vulns,         ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    news_blob     = json.dumps(news,          ensure_ascii=False, separators=(",", ":"))
+    json_blob     = (json.dumps(vulns, ensure_ascii=False, separators=(",", ":"))
+                     .replace("</", "<\\/")
+                     .replace("<!--", "\\u003C!--")
+                     .replace("<script", "\\u003Cscript").replace("<SCRIPT", "\\u003CSCRIPT"))
+    news_blob     = (json.dumps(news, ensure_ascii=False, separators=(",", ":"))
+                     .replace("<!--", "\\u003C!--").replace("<script", "\\u003Cscript"))
     dates_blob    = json.dumps(hist_dates)
     health_blob   = json.dumps(source_counts)
 

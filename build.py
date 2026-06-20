@@ -253,7 +253,7 @@ def _parse_nvd_entry(cve):
         "score": score,
         "severity": severity,
         "source": "NVD",
-        "published": cve.get("published", ""),
+        "published": (cve.get("published", "") or "").rstrip("Z") + "Z",
         "references": refs,
         "affected": sorted(affected)[:8],
         "cwes": cwes[:4],
@@ -2486,6 +2486,15 @@ function applyFilters(){
     if(aSort==="EPSS")return(b.epss||0)-(a.epss||0);
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
+  // Auto-expand range when 24H yields nothing (quiet period / NVD outage)
+  if(visData.length===0&&aRange==="24H"&&!aNew&&!aWlOnly&&aSev==="ALL"&&aSrc==="ALL"&&!q){
+    aRange="7D";
+    const maxAge2=RANGES["7D"];
+    visData=D.filter(v=>maxAge2===Infinity||(Date.now()-(v._ts||0))<=maxAge2);
+    document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
+    const p7=document.querySelector("[data-range='7D']");
+    if(p7)p7.classList.add("on");
+  }
   visEl.textContent=visData.length;
   shint.style.display=q?"inline":"none";
   clearBtn.style.display=q?"inline":"none";
@@ -3837,7 +3846,9 @@ def main():
                     if v.get("source") != "NVD":
                         continue
                     try:
-                        pub = datetime.fromisoformat(v["published"].replace("Z", "+00:00"))
+                        # Ensure UTC-aware comparison (NVD dates may lack Z suffix)
+                        pub_s = (v.get("published") or "").rstrip("Z") + "Z"
+                        pub = datetime.fromisoformat(pub_s.replace("Z", "+00:00"))
                         if pub >= cutoff:
                             nvd_results.append(v)
                     except Exception:

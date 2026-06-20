@@ -878,48 +878,49 @@ def fetch_cisco():
 
 
 # ---------------------------------------------------------------------------
-# Source: Arista Security Advisories (HTML listing scrape)
+# Source: Arista Security Advisories (RSS feed)
 # ---------------------------------------------------------------------------
 
 def fetch_arista():
-    log("Fetching Arista Security Advisories...")
-    raw = http_get("https://www.arista.com/en/support/advisories-notices/security-advisories")
+    log("Fetching Arista Security Advisories (RSS)...")
+    raw = http_get("https://www.arista.com/en/support/advisories-notices/security-advisory-rss")
     if not raw:
+        log("  Arista: RSS fetch failed")
         return []
 
     content = raw.decode("utf-8", errors="replace")
-    cut = cutoff_utc(hours=24 * 365)
-
-    # Find advisory links: /en/support/advisories-notices/security-advisories/XXXX-XXXX-XXX.html
-    links = re.findall(
-        r'href="(/en/support/advisories-notices/security-advisories/[\w-]+\.html)"[^>]*>([^<]+)',
-        content,
-    )
-    if not links:
-        log("  Arista: no advisory links found on listing page")
+    items = re.findall(r"<item>(.*?)</item>", content, re.DOTALL)
+    if not items:
+        log("  Arista: no items in RSS feed")
         return []
+
+    def _tag(xml, tag):
+        m = re.search(rf"<{tag}[^>]*>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</{tag}>", xml, re.DOTALL)
+        return m.group(1).strip() if m else ""
 
     results = []
     seen = set()
-    base = "https://www.arista.com"
+    for item in items:
+        url   = _tag(item, "link") or _tag(item, "guid")
+        title = _tag(item, "title")
+        desc  = re.sub(r"<[^>]+>", " ", _tag(item, "description")).strip()
+        pub   = _tag(item, "pubDate")
 
-    for path, link_text in links[:100]:
-        if path in seen:
-            continue
-        seen.add(path)
+        # Parse date
+        pub_iso = ""
+        if pub:
+            try:
+                from email.utils import parsedate_to_datetime
+                pub_iso = parsedate_to_datetime(pub).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                pub_iso = pub
 
-        url = base + path
-        page_raw = http_get(url)
-        if not page_raw:
-            continue
-
-        page = page_raw.decode("utf-8", errors="replace")
-
-        cves = list(dict.fromkeys(re.findall(r"CVE-\d{4}-\d+", page)))
-        cvss_m = re.search(r"(?:CVSS(?:\s+v\d)?(?:\s+Base)?\s+Score[:\s]+)(\d+(?:\.\d+)?)", page, re.I)
+        # Extract CVEs and CVSS from description
+        cves  = list(dict.fromkeys(re.findall(r"CVE-\d{4}-\d+", title + " " + desc)))
+        score_m = re.search(r"CVSSv?\d*\s*(?:Base\s+)?[Ss]core[:\s]+(\d+(?:\.\d+)?)", desc, re.I)
         score = None
         try:
-            score = float(cvss_m.group(1)) if cvss_m else None
+            score = float(score_m.group(1)) if score_m else None
         except (ValueError, TypeError):
             pass
 
@@ -930,30 +931,28 @@ def fetch_arista():
             elif score >= 4.0: sev = "MEDIUM"
             else:              sev = "LOW"
 
-        title = link_text.strip()
-        sa_m = re.search(r"((?:EoSA|SA)-\d{4}-\d+)", page, re.I)
-        vid = sa_m.group(1).upper() if sa_m else (cves[0] if cves else title[:60])
+        # Derive a stable ID from URL slug or first CVE
+        slug_m = re.search(r"/((?:SA|EoSA)-[\w-]+)(?:\.html)?", url or "", re.I)
+        vid = slug_m.group(1).upper() if slug_m else (cves[0] if cves else title[:60])
 
-        date_m = re.search(
-            r"(?:Published|Date)[:\s]+(\w+ \d{1,2},?\s+\d{4})", page, re.I
-        )
-        pub_str = date_m.group(1) if date_m else ""
+        if vid in seen:
+            continue
+        seen.add(vid)
 
         results.append({
-            "id": vid,
-            "title": title,
-            "description": "",
-            "score": score,
-            "severity": sev,
-            "source": "Arista",
-            "published": pub_str,
-            "references": [url] + [f"https://nvd.nist.gov/vuln/detail/{c}" for c in cves[:2]],
-            "affected": cves[:8],
-            "url": url,
+            "id":          vid,
+            "title":       title,
+            "description": desc[:800],
+            "score":       score,
+            "severity":    sev,
+            "source":      "Arista",
+            "published":   pub_iso,
+            "references":  ([url] if url else []) + [f"https://nvd.nist.gov/vuln/detail/{c}" for c in cves[:2]],
+            "affected":    cves[:8],
+            "url":         url or "",
         })
-        time.sleep(0.5)
 
-    log(f"  Arista: {len(results)} advisories")
+    log(f"  Arista: {len(results)} advisories from RSS")
     return results
 
 

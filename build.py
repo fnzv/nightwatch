@@ -3345,10 +3345,7 @@ def write_vendor_pages(vulns, date_str, base_url=BASE_URL):
             if kw in " ".join([v.get("id", ""), v.get("title", ""), v.get("description", ""),
                                 *v.get("affected", [])]).lower()
         ]
-        matched.sort(key=lambda v: (
-            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
-            -(v.get("score") or 0),
-        ))
+        matched.sort(key=lambda v: (v.get("published") or ""), reverse=True)
 
         if not matched:
             continue

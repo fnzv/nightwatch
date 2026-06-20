@@ -2502,19 +2502,38 @@ function applyFilters(){
       const hay=[v.id,v.title,v.description,...(v.affected||[]),...(v.references||[])].join(" ").toLowerCase();
       return q.trim().split(/\s+/).every(w=>hay.includes(w));
     }
-    // Step 1: expand range to ALL (keeps src + q)
-    if(aRange==="24H"||aRange==="7D"){
-      aRange="ALL";
-      visData=D.filter(v=>{
+    function _filterSrcQ(maxAge){
+      return D.filter(v=>{
         if(aSrcExcl&&v.source===aSrcExcl)return false;
         if(aSrc!=="ALL"&&v.source!==aSrc)return false;
+        if(maxAge!==Infinity&&(now2-(v._ts||0))>maxAge)return false;
         return _matchQ(v);
       });
-      document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
-      const pAll=document.querySelector("[data-range='ALL']");
-      if(pAll)pAll.classList.add("on");
     }
-    // Step 2: if still 0 and a specific source is set, drop src filter (q still applies)
+    function _setRange(r){
+      aRange=r;
+      document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
+      const p=document.querySelector("[data-range='"+r+"']");
+      if(p)p.classList.add("on");
+    }
+    const origRange=aRange,origSrc=aSrc;
+    // Step 1: if src is specific and q is set, try dropping src first (keeps range)
+    if(origSrc!=="ALL"&&q){
+      aSrc="ALL";aSrcExcl=null;
+      visData=D.filter(v=>{
+        const mx=RANGES[aRange];
+        if(mx!==Infinity&&(now2-(v._ts||0))>mx)return false;
+        return _matchQ(v);
+      });
+      if(visData.length>0)syncSrcPills();
+      else{aSrc=origSrc;} // restore if still 0
+    }
+    // Step 2: expand range to ALL (keeps current src + q)
+    if(visData.length===0&&(aRange==="24H"||aRange==="7D")){
+      _setRange("ALL");
+      visData=_filterSrcQ(Infinity);
+    }
+    // Step 3: if still 0 and src specific, drop src too (all sources, all time)
     if(visData.length===0&&aSrc!=="ALL"){
       aSrc="ALL";aSrcExcl=null;
       visData=D.filter(v=>_matchQ(v));

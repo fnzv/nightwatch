@@ -2497,19 +2497,11 @@ function applyFilters(){
   });
   // Auto-relax filters when 0 results
   if(visData.length===0&&!aNew&&!aWlOnly&&aSev==="ALL"&&!userPickedRange){
-    function _matchQ(v){
-      if(!q)return true;
+    function _matchWords(v,words){
       const hay=[v.id,v.title,v.description,...(v.affected||[]),...(v.references||[])].join(" ").toLowerCase();
-      return q.trim().split(/\s+/).every(w=>hay.includes(w));
+      return words.every(w=>hay.includes(w));
     }
-    function _filterSrcQ(maxAge){
-      return D.filter(v=>{
-        if(aSrcExcl&&v.source===aSrcExcl)return false;
-        if(aSrc!=="ALL"&&v.source!==aSrc)return false;
-        if(maxAge!==Infinity&&(now2-(v._ts||0))>maxAge)return false;
-        return _matchQ(v);
-      });
-    }
+    function _matchQ(v){return q?_matchWords(v,q.trim().split(/\s+/)):true;}
     function _setRange(r){
       aRange=r;
       document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
@@ -2517,26 +2509,33 @@ function applyFilters(){
       if(p)p.classList.add("on");
     }
     const origRange=aRange,origSrc=aSrc;
-    // Step 1: if src is specific and q is set, try dropping src first (keeps range)
-    if(origSrc!=="ALL"&&q){
+    // Implied keyword from source name (e.g. "OpenStack" → "openstack")
+    const impliedW=origSrc!=="ALL"?origSrc.toLowerCase().split(/[\s\-_]+/):[null];
+
+    // Step 1: drop src, keep range — use explicit query or implied source keyword
+    if(origSrc!=="ALL"){
       aSrc="ALL";aSrcExcl=null;
+      const mx=RANGES[aRange];
       visData=D.filter(v=>{
-        const mx=RANGES[aRange];
         if(mx!==Infinity&&(now2-(v._ts||0))>mx)return false;
-        return _matchQ(v);
+        return q?_matchQ(v):_matchWords(v,impliedW);
       });
-      if(visData.length>0)syncSrcPills();
-      else{aSrc=origSrc;} // restore if still 0
+      if(visData.length>0){syncSrcPills();}
+      else{aSrc=origSrc;aSrcExcl=origSrc===aSrc?null:aSrcExcl;} // restore
     }
-    // Step 2: expand range to ALL (keeps current src + q)
+    // Step 2: expand range to ALL, keep (possibly restored) src + q
     if(visData.length===0&&(aRange==="24H"||aRange==="7D")){
       _setRange("ALL");
-      visData=_filterSrcQ(Infinity);
+      visData=D.filter(v=>{
+        if(aSrcExcl&&v.source===aSrcExcl)return false;
+        if(aSrc!=="ALL"&&v.source!==aSrc)return false;
+        return q?_matchQ(v):_matchWords(v,impliedW);
+      });
     }
-    // Step 3: if still 0 and src specific, drop src too (all sources, all time)
-    if(visData.length===0&&aSrc!=="ALL"){
+    // Step 3: still 0 — all sources, all time
+    if(visData.length===0){
       aSrc="ALL";aSrcExcl=null;
-      visData=D.filter(v=>_matchQ(v));
+      visData=D.filter(v=>q?_matchQ(v):true);
       syncSrcPills();
     }
   }

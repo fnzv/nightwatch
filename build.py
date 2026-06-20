@@ -2651,8 +2651,11 @@ document.getElementById("shareBtn").addEventListener("click",function(){
   }).catch(()=>prompt("Copy this link:",location.href));
 });
 
-// Subscribe widget — hide permanently after submission
-(function(){
+applyHash();
+applyFilters();
+
+// Subscribe widget — runs after cards are rendered, isolated so any error can't block rendering
+try{(function(){
   const w=document.getElementById("sub-widget");
   const t=document.getElementById("sub-thanks");
   const s=document.getElementById("subscribe-strip");
@@ -2662,14 +2665,11 @@ document.getElementById("shareBtn").addEventListener("click",function(){
     return;
   }
   if(w)w.addEventListener("submit",function(){
-    localStorage.setItem("vf_subscribed","1");
+    try{localStorage.setItem("vf_subscribed","1");}catch(_){}
     setTimeout(()=>{w.style.display="none";if(t)t.style.display="block";
       if(s)s.style.display="none";},400);
   });
-})();
-
-applyHash();
-applyFilters();
+})()}catch(_){}
 </script>
 <section id="subscribe-strip">
   <div class="sub-inner">
@@ -4007,14 +4007,6 @@ def main():
             v["score"], v["severity"] = best
             advisory_scored += 1
     log(f"  Advisory score propagation: {advisory_scored} entries scored")
-
-    # --- Patch status via OSV.dev (fresh CVEs only to limit API calls) ---
-    log("Fetching patch status...")
-    fresh_cve_ids = [v["id"] for v in fresh if v["id"].startswith("CVE-")]
-    patch_map = fetch_patch_status(fresh_cve_ids)
-    for v in vulns:
-        if v["id"] in patch_map:
-            v["patch"] = patch_map[v["id"]]
 
     # --- PoC availability via nomi-sec/PoC-in-GitHub ---
     log("Checking PoC availability...")

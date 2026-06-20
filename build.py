@@ -2128,8 +2128,8 @@ __CWE_INDEX_HTML__
   <div class="pills">
     <span class="plabel">Period:</span>
     <button class="pill" data-range="ALL">All time</button>
-    <button class="pill on" data-range="24H">Last 24h</button>
-    <button class="pill" data-range="7D">Last 7 days</button>
+    <button class="pill" data-range="24H">Last 24h</button>
+    <button class="pill on" data-range="7D">Last 7 days</button>
     <button class="pill" data-range="30D">Last 30 days</button>
     <button class="pill" data-range="1Y">Last year</button>
     <div class="sep"></div>
@@ -2372,7 +2372,7 @@ function priority(v){
 
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};
 const SEV_ORDER={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4};
-let aSev="ALL",aSrc="ALL",aSrcExcl=null,aRange="24H",aSort="DATE",aNew=false,aWlOnly=false,q="";
+let aSev="ALL",aSrc="ALL",aSrcExcl=null,aRange="7D",aSort="DATE",aNew=false,aWlOnly=false,q="";
 
 // --- Watchlist ---
 let watchlist=JSON.parse(localStorage.getItem("vf_watchlist")||"[]");
@@ -2455,7 +2455,7 @@ function applyHash(){
   const p=new URLSearchParams(h);
   q=p.get("q")||"";aSev=p.get("sev")||"ALL";aSrc=p.get("src")||"ALL";
   aSrcExcl=p.get("srcx")||null;
-  aRange=p.get("range")||(p.get("q")?"ALL":"24H");aSort=p.get("sort")||"DATE";
+  aRange=p.get("range")||(p.get("q")?"ALL":"7D");aSort=p.get("sort")||"DATE";
   aNew=p.get("new")==="1";
   document.getElementById("search").value=q;
   document.getElementById("newPill").classList.toggle("on",aNew);
@@ -2494,14 +2494,13 @@ function applyFilters(){
     if(aSort==="EPSS")return(b.epss||0)-(a.epss||0);
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
-  // Auto-expand range when 24H yields nothing (quiet period / NVD outage)
-  if(visData.length===0&&aRange==="24H"&&!aNew&&!aWlOnly&&aSev==="ALL"&&aSrc==="ALL"&&!q){
-    aRange="7D";
-    const maxAge2=RANGES["7D"];
-    visData=D.filter(v=>maxAge2===Infinity||(Date.now()-(v._ts||0))<=maxAge2);
+  // Auto-expand: if 7D yields nothing, show all time (NVD outage / date parse failure)
+  if(visData.length===0&&(aRange==="24H"||aRange==="7D")&&!aNew&&!aWlOnly&&aSev==="ALL"&&aSrc==="ALL"&&!q){
+    aRange="ALL";
+    visData=D.slice();
     document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
-    const p7=document.querySelector("[data-range='7D']");
-    if(p7)p7.classList.add("on");
+    const pAll=document.querySelector("[data-range='ALL']");
+    if(pAll)pAll.classList.add("on");
   }
   visEl.textContent=visData.length;
   shint.style.display=q?"inline":"none";

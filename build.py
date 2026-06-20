@@ -2047,9 +2047,21 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .sub-form input[type=email]::placeholder{color:#64748b}
 .sub-form button{padding:.38rem .9rem;border-radius:6px;background:#2563eb;color:#fff;border:none;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}
 .sub-form button:hover{background:#1d4ed8}
+/* Compact header subscribe widget */
+#sub-widget{display:flex;align-items:center;gap:.4rem;margin-top:.45rem;justify-content:flex-end}
+#sub-widget input[type=email]{padding:.28rem .6rem;border-radius:5px;border:1px solid #334155;
+  background:#1e293b;color:#f1f5f9;font-size:.75rem;outline:none;width:170px}
+#sub-widget input[type=email]:focus{border-color:#60a5fa}
+#sub-widget input[type=email]::placeholder{color:#64748b}
+#sub-widget button{padding:.28rem .65rem;border-radius:5px;background:#2563eb;color:#fff;
+  border:none;font-size:.75rem;font-weight:600;cursor:pointer;white-space:nowrap}
+#sub-widget button:hover{background:#1d4ed8}
+#sub-widget .sub-label{font-size:.72rem;color:#94a3b8;white-space:nowrap}
+#sub-thanks{font-size:.75rem;color:#4ade80;margin-top:.45rem;text-align:right;display:none}
 @media(max-width:640px){
   .sub-inner{flex-direction:column;align-items:flex-start}
   .sub-form input[type=email]{width:100%}
+  #sub-widget{display:none}
 }
 </style>
 </head>
@@ -2069,6 +2081,14 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
     </div>
+    <form id="sub-widget" action="https://buttondown.com/api/emails/embed-subscribe/vulnfeed"
+          method="post" target="popupwindow"
+          onsubmit="window.open('https://buttondown.com/vulnfeed','popupwindow')">
+      <span class="sub-label">&#128231; Weekly digest</span>
+      <input type="email" name="email" placeholder="you@company.com" required>
+      <button type="submit">Subscribe</button>
+    </form>
+    <div id="sub-thanks">&#10003; Subscribed &mdash; see you Monday!</div>
   </div>
 </header>
 <div id="hist-banner"></div>
@@ -2630,6 +2650,23 @@ document.getElementById("shareBtn").addEventListener("click",function(){
     setTimeout(()=>{btn.innerHTML=prev;btn.style.color="";},1800);
   }).catch(()=>prompt("Copy this link:",location.href));
 });
+
+// Subscribe widget — hide permanently after submission
+(function(){
+  const w=document.getElementById("sub-widget");
+  const t=document.getElementById("sub-thanks");
+  const s=document.getElementById("subscribe-strip");
+  if(localStorage.getItem("vf_subscribed")){
+    if(w)w.style.display="none";
+    if(s)s.style.display="none";
+    return;
+  }
+  if(w)w.addEventListener("submit",function(){
+    localStorage.setItem("vf_subscribed","1");
+    setTimeout(()=>{w.style.display="none";if(t)t.style.display="block";
+      if(s)s.style.display="none";},400);
+  });
+})();
 
 applyHash();
 applyFilters();

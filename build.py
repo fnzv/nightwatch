@@ -202,8 +202,59 @@ def _parse_nvd_metrics(cve):
     return score, severity
 
 
+def _parse_nvd_entry(cve):
+    """Convert a raw NVD CVE dict into our internal record format."""
+    cve_id = cve.get("id", "")
+    desc = next(
+        (d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), ""
+    )
+    score, severity = _parse_nvd_metrics(cve)
+    refs = [r["url"] for r in cve.get("references", [])[:5] if r.get("url")]
+    affected = set()
+    for cfg in cve.get("configurations", []):
+        for node in cfg.get("nodes", []):
+            for cpe_m in node.get("cpeMatch", []):
+                parts = cpe_m.get("criteria", "").split(":")
+                if len(parts) > 4:
+                    vendor, product = parts[3], parts[4]
+                    if vendor not in ("*", "") and product not in ("*", ""):
+                        affected.add(f"{vendor}/{product}")
+    cwes = []
+    for weakness in cve.get("weaknesses", []):
+        for wd in weakness.get("description", []):
+            val = wd.get("value", "")
+            if re.match(r"^CWE-\d+$", val) and val not in cwes:
+                cwes.append(val)
+    return {
+        "id": cve_id,
+        "title": (desc[:160] if desc else cve_id),
+        "description": desc,
+        "score": score,
+        "severity": severity,
+        "source": "NVD",
+        "published": cve.get("published", ""),
+        "references": refs,
+        "affected": sorted(affected)[:8],
+        "cwes": cwes[:4],
+        "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+    }
+
+
+def _http_get_retry(url, retries=3, backoff=10, **kwargs):
+    """http_get with exponential backoff retries (for flaky APIs like NVD)."""
+    for attempt in range(retries):
+        raw = http_get(url, **kwargs)
+        if raw is not None:
+            return raw
+        if attempt < retries - 1:
+            wait = backoff * (2 ** attempt)
+            log(f"  Retrying in {wait}s (attempt {attempt + 1}/{retries})...")
+            time.sleep(wait)
+    return None
+
+
 def fetch_nvd(hours=168):  # 7 days
-    log("Fetching NVD CVEs (last 24 h)...")
+    log("Fetching NVD CVEs (last 7 days)...")
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=hours)
     fmt = "%Y-%m-%dT%H:%M:%S.000"
@@ -220,7 +271,7 @@ def fetch_nvd(hours=168):  # 7 days
             f"&resultsPerPage=2000"
             f"&startIndex={start_index}"
         )
-        raw = http_get(url)
+        raw = _http_get_retry(url, retries=3, backoff=15)
         if raw is None:
             break
 
@@ -234,48 +285,7 @@ def fetch_nvd(hours=168):  # 7 days
         vulns = data.get("vulnerabilities", [])
 
         for item in vulns:
-            cve = item.get("cve", {})
-            cve_id = cve.get("id", "")
-
-            desc = next(
-                (d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"),
-                ""
-            )
-
-            score, severity = _parse_nvd_metrics(cve)
-
-            refs = [r["url"] for r in cve.get("references", [])[:5] if r.get("url")]
-
-            affected = set()
-            for cfg in cve.get("configurations", []):
-                for node in cfg.get("nodes", []):
-                    for cpe_m in node.get("cpeMatch", []):
-                        parts = cpe_m.get("criteria", "").split(":")
-                        if len(parts) > 4:
-                            vendor, product = parts[3], parts[4]
-                            if vendor not in ("*", "") and product not in ("*", ""):
-                                affected.add(f"{vendor}/{product}")
-
-            cwes = []
-            for weakness in cve.get("weaknesses", []):
-                for wd in weakness.get("description", []):
-                    val = wd.get("value", "")
-                    if re.match(r"^CWE-\d+$", val) and val not in cwes:
-                        cwes.append(val)
-
-            results.append({
-                "id": cve_id,
-                "title": (desc[:160] if desc else cve_id),
-                "description": desc,
-                "score": score,
-                "severity": severity,
-                "source": "NVD",
-                "published": cve.get("published", ""),
-                "references": refs,
-                "affected": sorted(affected)[:8],
-                "cwes": cwes[:4],
-                "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
-            })
+            results.append(_parse_nvd_entry(item.get("cve", {})))
 
         start_index += len(vulns)
         if len(vulns) < 2000:
@@ -3793,7 +3803,31 @@ def main():
 
     # --- Fresh fetch ---
     fresh = []
-    fresh += fetch_nvd()
+    nvd_results = fetch_nvd()
+    if not nvd_results:
+        # NVD was unreachable — pull recent NVD entries from yesterday's snapshot
+        # so the 24h view doesn't go empty during outages.
+        log("  NVD returned 0 — falling back to yesterday's NVD entries...")
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+        yday_path = os.path.join(HISTORICAL_DIR, f"{yesterday}.json")
+        if os.path.exists(yday_path):
+            try:
+                with open(yday_path, encoding="utf-8") as f:
+                    yday_data = json.load(f)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+                for v in yday_data:
+                    if v.get("source") != "NVD":
+                        continue
+                    try:
+                        pub = datetime.fromisoformat(v["published"].replace("Z", "+00:00"))
+                        if pub >= cutoff:
+                            nvd_results.append(v)
+                    except Exception:
+                        pass
+                log(f"  NVD fallback: {len(nvd_results)} entries from {yesterday}")
+            except Exception as ex:
+                log(f"  NVD fallback error: {ex}")
+    fresh += nvd_results
 
     time.sleep(2)
 

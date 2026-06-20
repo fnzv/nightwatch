@@ -2495,17 +2495,31 @@ function applyFilters(){
     if(aSort==="EPSS")return(b.epss||0)-(a.epss||0);
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
-  // Auto-expand: if 7D yields nothing, show all time (NVD outage / date parse failure)
-  if(visData.length===0&&(aRange==="24H"||aRange==="7D")&&!aNew&&!aWlOnly&&aSev==="ALL"&&!q&&!userPickedRange){
-    aRange="ALL";
-    visData=D.filter(v=>{
-      if(aSrcExcl&&v.source===aSrcExcl)return false;
-      if(aSrc!=="ALL"&&v.source!==aSrc)return false;
-      return true;
-    });
-    document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
-    const pAll=document.querySelector("[data-range='ALL']");
-    if(pAll)pAll.classList.add("on");
+  // Auto-relax filters when 0 results
+  if(visData.length===0&&!aNew&&!aWlOnly&&aSev==="ALL"&&!userPickedRange){
+    function _matchQ(v){
+      if(!q)return true;
+      const hay=[v.id,v.title,v.description,...(v.affected||[]),...(v.references||[])].join(" ").toLowerCase();
+      return q.trim().split(/\s+/).every(w=>hay.includes(w));
+    }
+    // Step 1: expand range to ALL (keeps src + q)
+    if(aRange==="24H"||aRange==="7D"){
+      aRange="ALL";
+      visData=D.filter(v=>{
+        if(aSrcExcl&&v.source===aSrcExcl)return false;
+        if(aSrc!=="ALL"&&v.source!==aSrc)return false;
+        return _matchQ(v);
+      });
+      document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
+      const pAll=document.querySelector("[data-range='ALL']");
+      if(pAll)pAll.classList.add("on");
+    }
+    // Step 2: if still 0 and a specific source is set, drop src filter (q still applies)
+    if(visData.length===0&&aSrc!=="ALL"){
+      aSrc="ALL";aSrcExcl=null;
+      visData=D.filter(v=>_matchQ(v));
+      syncSrcPills();
+    }
   }
   visEl.textContent=visData.length;
   shint.style.display=q?"inline":"none";

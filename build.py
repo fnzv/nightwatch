@@ -2037,32 +2037,23 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   header,#chart-wrap,.bar,.stats,#grid,#wl-panel{padding-left:1rem;padding-right:1rem}
   #grid{grid-template-columns:1fr}
 }
-#subscribe-strip{background:#0f172a;border-top:1px solid #1e293b;padding:.9rem 2rem}
-.sub-inner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;max-width:1100px;margin:0 auto}
-#subscribe-strip strong{color:#f1f5f9;font-size:.85rem}
-.sub-desc{color:#94a3b8;font-size:.78rem;margin-left:.5rem}
-.sub-form{display:flex;gap:.4rem;flex-wrap:wrap}
-.sub-form input[type=email]{padding:.38rem .75rem;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:.82rem;outline:none;width:220px}
-.sub-form input[type=email]:focus{border-color:#60a5fa}
-.sub-form input[type=email]::placeholder{color:#64748b}
-.sub-form button{padding:.38rem .9rem;border-radius:6px;background:#2563eb;color:#fff;border:none;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}
-.sub-form button:hover{background:#1d4ed8}
-/* Compact header subscribe widget */
-#sub-widget{display:flex;align-items:center;gap:.4rem;margin-top:.45rem;justify-content:flex-end}
-#sub-widget input[type=email]{padding:.28rem .6rem;border-radius:5px;border:1px solid #334155;
-  background:#1e293b;color:#f1f5f9;font-size:.75rem;outline:none;width:170px}
-#sub-widget input[type=email]:focus{border-color:#60a5fa}
-#sub-widget input[type=email]::placeholder{color:#64748b}
-#sub-widget button{padding:.28rem .65rem;border-radius:5px;background:#2563eb;color:#fff;
-  border:none;font-size:.75rem;font-weight:600;cursor:pointer;white-space:nowrap}
-#sub-widget button:hover{background:#1d4ed8}
-#sub-widget .sub-label{font-size:.72rem;color:#94a3b8;white-space:nowrap}
-#sub-thanks{font-size:.75rem;color:#4ade80;margin-top:.45rem;text-align:right;display:none}
-@media(max-width:640px){
-  .sub-inner{flex-direction:column;align-items:flex-start}
-  .sub-form input[type=email]{width:100%}
-  #sub-widget{display:none}
-}
+/* Subscribe modal */
+#sub-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:999;align-items:center;justify-content:center}
+#sub-modal.open{display:flex}
+#sub-modal-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:2rem;max-width:360px;width:90%;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#sub-close{position:absolute;top:.6rem;right:.85rem;background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;padding:0}
+#sub-close:hover{color:#f1f5f9}
+#sub-modal h2{margin:0 0 .35rem;font-size:1.05rem;color:#f1f5f9}
+#sub-modal p{font-size:.8rem;color:#94a3b8;margin:0 0 1rem}
+#sub-form{display:flex;flex-direction:column;gap:.5rem}
+#sub-form input[type=email]{padding:.5rem .75rem;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:.85rem;outline:none}
+#sub-form input[type=email]:focus{border-color:#60a5fa}
+#sub-form input[type=email]::placeholder{color:#64748b}
+#sub-form button{padding:.5rem .9rem;border-radius:6px;background:#2563eb;color:#fff;border:none;font-size:.85rem;font-weight:600;cursor:pointer}
+#sub-form button:hover{background:#1d4ed8}
+#sub-modal-thanks{font-size:.88rem;color:#4ade80;text-align:center;padding:.5rem 0;display:none}
+#sub-open-btn{padding:.22rem .7rem;border-radius:5px;background:transparent;color:#94a3b8;border:1px solid #334155;font-size:.75rem;cursor:pointer;white-space:nowrap}
+#sub-open-btn:hover{border-color:#60a5fa;color:#f1f5f9}
 </style>
 </head>
 <body>
@@ -2081,14 +2072,9 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
     </div>
-    <form id="sub-widget" action="https://buttondown.com/api/emails/embed-subscribe/vulnfeed"
-          method="post" target="popupwindow"
-          onsubmit="window.open('https://buttondown.com/vulnfeed','popupwindow')">
-      <span class="sub-label">&#128231; Weekly digest</span>
-      <input type="email" name="email" placeholder="you@company.com" required>
-      <button type="submit">Subscribe</button>
-    </form>
-    <div id="sub-thanks">&#10003; Subscribed &mdash; see you Monday!</div>
+    <div style="margin-top:.45rem;text-align:right">
+      <button id="sub-open-btn">&#128231; Weekly digest</button>
+    </div>
   </div>
 </header>
 <div id="hist-banner"></div>
@@ -2654,37 +2640,46 @@ document.getElementById("shareBtn").addEventListener("click",function(){
 applyHash();
 applyFilters();
 
-// Subscribe widget — runs after cards are rendered, isolated so any error can't block rendering
+// Subscribe modal — isolated so errors can't block card rendering
 try{(function(){
-  const w=document.getElementById("sub-widget");
-  const t=document.getElementById("sub-thanks");
-  const s=document.getElementById("subscribe-strip");
-  if(localStorage.getItem("vf_subscribed")){
-    if(w)w.style.display="none";
-    if(s)s.style.display="none";
-    return;
-  }
-  if(w)w.addEventListener("submit",function(){
+  const ob=document.getElementById("sub-open-btn");
+  if(localStorage.getItem("vf_subscribed")){if(ob)ob.style.display="none";return;}
+  const modal=document.getElementById("sub-modal");
+  const cls=document.getElementById("sub-close");
+  const form=document.getElementById("sub-form");
+  const thanks=document.getElementById("sub-modal-thanks");
+  function openModal(){if(modal)modal.classList.add("open");}
+  function closeModal(){if(modal)modal.classList.remove("open");}
+  if(ob)ob.addEventListener("click",openModal);
+  if(cls)cls.addEventListener("click",closeModal);
+  if(modal)modal.addEventListener("click",function(e){if(e.target===modal)closeModal();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeModal();});
+  if(form)form.addEventListener("submit",function(){
     try{localStorage.setItem("vf_subscribed","1");}catch(_){}
-    setTimeout(()=>{w.style.display="none";if(t)t.style.display="block";
-      if(s)s.style.display="none";},400);
+    setTimeout(()=>{
+      if(form)form.style.display="none";
+      if(thanks)thanks.style.display="block";
+      if(ob)ob.style.display="none";
+      setTimeout(closeModal,1800);
+    },400);
   });
 })()}catch(_){}
 </script>
-<section id="subscribe-strip">
-  <div class="sub-inner">
-    <div>
-      <strong>Weekly digest</strong>
-      <span class="sub-desc">Top CVEs of the week, every Monday. No spam.</span>
-    </div>
-    <form class="sub-form" action="https://buttondown.email/api/emails/embed-subscribe/vulnfeed"
+<div id="sub-modal" role="dialog" aria-modal="true" aria-label="Subscribe to weekly digest">
+  <div id="sub-modal-box">
+    <button id="sub-close" aria-label="Close">&times;</button>
+    <div style="font-size:1.6rem;margin-bottom:.5rem">&#128231;</div>
+    <h2>Weekly Digest</h2>
+    <p>Top CVEs every Monday. No spam, unsubscribe anytime.</p>
+    <form id="sub-form" action="https://buttondown.com/api/emails/embed-subscribe/vulnfeed"
           method="post" target="popupwindow"
-          onsubmit="window.open('https://buttondown.email/vulnfeed','popupwindow')">
+          onsubmit="window.open('https://buttondown.com/vulnfeed','popupwindow')">
       <input type="email" name="email" placeholder="you@company.com" required>
       <button type="submit">Subscribe</button>
     </form>
+    <div id="sub-modal-thanks">&#10003; Subscribed &mdash; see you Monday!</div>
   </div>
-</section>
+</div>
 __STATIC_CVE_HTML__
 </body>
 </html>

@@ -2373,7 +2373,7 @@ function priority(v){
 
 const RANGES={"24H":864e5,"7D":6048e5,"30D":2592e6,"1Y":31536e6,"ALL":Infinity};
 const SEV_ORDER={"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"UNKNOWN":4};
-let aSev="ALL",aSrc="ALL",aSrcExcl=null,aRange="7D",aSort="DATE",aNew=false,aWlOnly=false,q="";
+let aSev="ALL",aSrc="ALL",aSrcExcl=null,aRange="7D",aSort="DATE",aNew=false,aWlOnly=false,q="",userPickedRange=false;
 
 // --- Watchlist ---
 let watchlist=JSON.parse(localStorage.getItem("vf_watchlist")||"[]");
@@ -2496,7 +2496,7 @@ function applyFilters(){
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
   // Auto-expand: if 7D yields nothing, show all time (NVD outage / date parse failure)
-  if(visData.length===0&&(aRange==="24H"||aRange==="7D")&&!aNew&&!aWlOnly&&aSev==="ALL"&&!q){
+  if(visData.length===0&&(aRange==="24H"||aRange==="7D")&&!aNew&&!aWlOnly&&aSev==="ALL"&&!q&&!userPickedRange){
     aRange="ALL";
     visData=D.filter(v=>{
       if(aSrcExcl&&v.source===aSrcExcl)return false;
@@ -2542,7 +2542,7 @@ function bindPills(attr,setter){
   }));
 }
 bindPills("data-sev",v=>aSev=v);
-bindPills("data-range",v=>aRange=v);bindPills("data-sort",v=>aSort=v);
+bindPills("data-range",v=>{aRange=v;userPickedRange=true;});bindPills("data-sort",v=>aSort=v);
 
 // 3-state source pills: click1=include, click2=exclude, click3=reset
 document.querySelectorAll(".pill[data-src]").forEach(b=>b.addEventListener("click",()=>{
@@ -2551,6 +2551,7 @@ document.querySelectorAll(".pill[data-src]").forEach(b=>b.addEventListener("clic
   else if(aSrc===s){aSrc="ALL";aSrcExcl=s;}  // 2nd click → exclude
   else if(aSrcExcl===s){aSrcExcl=null;}       // 3rd click → reset
   else{aSrc=s;aSrcExcl=null;}                 // 1st click → include
+  userPickedRange=false;
   syncSrcPills();applyFilters();
 }));
 

@@ -2495,48 +2495,44 @@ function applyFilters(){
     if(aSort==="EPSS")return(b.epss||0)-(a.epss||0);
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
-  // Auto-relax filters when 0 results
+  // Auto-relax filters when 0 results — overrides visData only, never touches aSrc/aRange
+  // so source pills and range pills stay visually highlighted as the user left them.
   if(visData.length===0&&!aNew&&!aWlOnly&&aSev==="ALL"&&!userPickedRange){
     function _matchWords(v,words){
       const hay=[v.id,v.title,v.description,...(v.affected||[]),...(v.references||[])].join(" ").toLowerCase();
       return words.every(w=>hay.includes(w));
     }
     function _matchQ(v){return q?_matchWords(v,q.trim().split(/\s+/)):true;}
-    function _setRange(r){
-      aRange=r;
-      document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
-      const p=document.querySelector("[data-range='"+r+"']");
-      if(p)p.classList.add("on");
-    }
-    const origRange=aRange,origSrc=aSrc;
-    // Implied keyword from source name (e.g. "OpenStack" → "openstack")
-    const impliedW=origSrc!=="ALL"?origSrc.toLowerCase().split(/[\s\-_]+/):[null];
+    const origRange=aRange;
+    // Implied keyword from source name (e.g. "OpenStack" → ["openstack"])
+    const impliedW=aSrc!=="ALL"?aSrc.toLowerCase().split(/[\s\-_]+/):null;
+    const keyMatch=v=>q?_matchQ(v):(impliedW?_matchWords(v,impliedW):true);
 
-    // Step 1: drop src, keep range — use explicit query or implied source keyword
-    if(origSrc!=="ALL"){
-      aSrc="ALL";aSrcExcl=null;
+    // Step 1: drop src restriction, keep range — match by query or implied keyword
+    if(aSrc!=="ALL"){
       const mx=RANGES[aRange];
       visData=D.filter(v=>{
         if(mx!==Infinity&&(now2-(v._ts||0))>mx)return false;
-        return q?_matchQ(v):_matchWords(v,impliedW);
+        return keyMatch(v);
       });
-      if(visData.length>0){syncSrcPills();}
-      else{aSrc=origSrc;aSrcExcl=origSrc===aSrc?null:aSrcExcl;} // restore
     }
-    // Step 2: expand range to ALL, keep (possibly restored) src + q
-    if(visData.length===0&&(aRange==="24H"||aRange==="7D")){
-      _setRange("ALL");
+    // Step 2: expand range to ALL — keep src restriction + keyword match
+    if(visData.length===0&&(origRange==="24H"||origRange==="7D")){
+      aRange="ALL";
+      document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
+      const pAll=document.querySelector("[data-range='ALL']");if(pAll)pAll.classList.add("on");
       visData=D.filter(v=>{
         if(aSrcExcl&&v.source===aSrcExcl)return false;
         if(aSrc!=="ALL"&&v.source!==aSrc)return false;
-        return q?_matchQ(v):_matchWords(v,impliedW);
+        return keyMatch(v);
       });
     }
-    // Step 3: still 0 — all sources, all time
+    // Step 3: still 0 — all sources, all time, keyword match only
     if(visData.length===0){
-      aSrc="ALL";aSrcExcl=null;
-      visData=D.filter(v=>q?_matchQ(v):true);
-      syncSrcPills();
+      aRange="ALL";
+      document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
+      const pAll=document.querySelector("[data-range='ALL']");if(pAll)pAll.classList.add("on");
+      visData=D.filter(v=>keyMatch(v));
     }
   }
   visEl.textContent=visData.length;

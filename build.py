@@ -1737,7 +1737,7 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
             fix_html = (
                 f'  <div class="fix-box"><h2>Remediation</h2>'
                 f'<code>$ {_xe(fix_cmd)}</code>'
-                f'<button onclick="navigator.clipboard.writeText({json.dumps(fix_cmd)})'
+                f'<button onclick="navigator.clipboard.writeText({_xe(json.dumps(fix_cmd))})'
                 f'.then(()=>{{this.textContent=\'✓ Copied\';setTimeout(()=>this.textContent=\'Copy command\',1500)}})">Copy command</button></div>'
             )
         else:

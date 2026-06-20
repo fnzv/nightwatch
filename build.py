@@ -2700,14 +2700,21 @@ try{(function(){
   if(cls)cls.addEventListener("click",closeModal);
   if(modal)modal.addEventListener("click",function(e){if(e.target===modal)closeModal();});
   document.addEventListener("keydown",function(e){if(e.key==="Escape")closeModal();});
-  if(form)form.addEventListener("submit",function(){
-    try{localStorage.setItem("vf_subscribed","1");}catch(_){}
-    setTimeout(()=>{
+  if(form)form.addEventListener("submit",function(e){
+    e.preventDefault();
+    const email=form.querySelector('[name=email]').value;
+    const btn=form.querySelector('button[type=submit]');
+    if(btn){btn.disabled=true;btn.textContent="Sending…";}
+    const body=new URLSearchParams({email:email,embed:"1"});
+    function _done(){
+      try{localStorage.setItem("vf_subscribed","1");}catch(_){}
       if(form)form.style.display="none";
       if(thanks)thanks.style.display="block";
       if(ob)ob.style.display="none";
       setTimeout(closeModal,1800);
-    },400);
+    }
+    fetch("https://buttondown.com/api/emails/embed-subscribe/vulnfeed",{method:"POST",body:body})
+      .then(_done).catch(_done);
   });
 })()}catch(_){}
 </script>
@@ -2717,9 +2724,7 @@ try{(function(){
     <div style="font-size:1.6rem;margin-bottom:.5rem">&#128231;</div>
     <h2>Weekly Digest</h2>
     <p>Top CVEs every Monday. No spam, unsubscribe anytime.</p>
-    <form id="sub-form" action="https://buttondown.com/api/emails/embed-subscribe/vulnfeed"
-          method="post" target="popupwindow"
-          onsubmit="window.open('https://buttondown.com/vulnfeed','popupwindow')">
+    <form id="sub-form">
       <input type="email" name="email" placeholder="you@company.com" required>
       <button type="submit">Subscribe</button>
     </form>

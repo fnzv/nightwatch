@@ -2160,8 +2160,9 @@ __CWE_INDEX_HTML__
 <div id="sentinel"></div>
 <div id="news-panel"></div>
 
+<script type="application/json" id="vf-data">__JSON__</script>
 <script>
-let D=__JSON__;
+let D=JSON.parse(document.getElementById('vf-data').textContent);
 const D_TODAY=D;
 const DATES=__DATES_JSON__;
 const NEWS=__NEWS_JSON__;

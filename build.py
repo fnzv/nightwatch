@@ -2496,9 +2496,13 @@ function applyFilters(){
     return(SEV_ORDER[SEV(a)]??4)-(SEV_ORDER[SEV(b)]??4)||(b.score||0)-(a.score||0);
   });
   // Auto-expand: if 7D yields nothing, show all time (NVD outage / date parse failure)
-  if(visData.length===0&&(aRange==="24H"||aRange==="7D")&&!aNew&&!aWlOnly&&aSev==="ALL"&&aSrc==="ALL"&&!q){
+  if(visData.length===0&&(aRange==="24H"||aRange==="7D")&&!aNew&&!aWlOnly&&aSev==="ALL"&&!q){
     aRange="ALL";
-    visData=D.slice();
+    visData=D.filter(v=>{
+      if(aSrcExcl&&v.source===aSrcExcl)return false;
+      if(aSrc!=="ALL"&&v.source!==aSrc)return false;
+      return true;
+    });
     document.querySelectorAll("[data-range]").forEach(b=>b.classList.remove("on"));
     const pAll=document.querySelector("[data-range='ALL']");
     if(pAll)pAll.classList.add("on");

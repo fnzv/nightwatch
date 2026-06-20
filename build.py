@@ -79,6 +79,27 @@ def cutoff_utc(hours=24):
     return datetime.now(timezone.utc) - timedelta(hours=hours)
 
 
+def _parse_pub_date(s):
+    """Parse a published date string (ISO-8601 or RFC-822) to a UTC datetime.
+    Returns None on failure."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    try:
+        return parsedate_to_datetime(s).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _pub_ymd(s):
+    """Return YYYY-MM-DD string from any date format, or '' on failure."""
+    dt = _parse_pub_date(s)
+    return dt.strftime("%Y-%m-%d") if dt else (s or "")[:10]
+
+
 # ---------------------------------------------------------------------------
 # GitHub Advisories: ecosystems to watch (covers Go, Python, npm, Rust, Java, .NET, Ruby)
 # The affects= filter doesn't work for C libraries (curl, openssl etc) — those come via NVD.
@@ -3345,7 +3366,7 @@ def write_vendor_pages(vulns, date_str, base_url=BASE_URL):
             if kw in " ".join([v.get("id", ""), v.get("title", ""), v.get("description", ""),
                                 *v.get("affected", [])]).lower()
         ]
-        matched.sort(key=lambda v: (v.get("published") or ""), reverse=True)
+        matched.sort(key=lambda v: _pub_ymd(v.get("published") or ""), reverse=True)
 
         if not matched:
             continue
@@ -3356,7 +3377,7 @@ def write_vendor_pages(vulns, date_str, base_url=BASE_URL):
             cve_url = v.get("url", "")
             sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
             epss_str = f'{v["epss_pct"]:.0f}%ile' if v.get("epss_pct") is not None else "—"
-            pub = (v.get("published") or "")[:10]
+            pub = _pub_ymd(v.get("published") or "")
             ttl = _xe((v.get("title") or v["id"])[:120])
             rows.append(
                 f'<tr>'
@@ -3537,7 +3558,7 @@ def write_cwe_pages(vulns, date_str, base_url=BASE_URL):
             sev = v.get("severity", "UNKNOWN")
             sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
             epss_str = f'{v["epss_pct"]:.0f}%ile' if v.get("epss_pct") is not None else "—"
-            pub = (v.get("published") or "")[:10]
+            pub = _pub_ymd(v.get("published") or "")
             ttl = _xe((v.get("title") or v["id"])[:120])
             url = _xe(v.get("url", ""))
             rows.append(
@@ -3709,7 +3730,7 @@ def _write_single_digest(vulns, date_str, all_dates, base_url=BASE_URL):
     for v in top:
         sev = v.get("severity", "UNKNOWN")
         sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
-        pub = (v.get("published") or "")[:10]
+        pub = _pub_ymd(v.get("published") or "")
         ttl = _xe((v.get("title") or v["id"])[:120])
         url = _xe(v.get("url", ""))
         rows.append(

@@ -2314,7 +2314,7 @@ function card(v){
   const ttl=v.title&&v.title!==v.description?`<div class="ctitle">${esc(v.title)}</div>`:"";
   const dsc=v.description?`<div class="cdesc">${esc(v.description)}</div>`:"";
   const dt=v._ts?`<div class="cdate">${timeAgo(v._ts)}</div>`:"";
-  const fixHtml=v.fix?`<div class="fix-cmd"><code>$ ${esc(v.fix)}</code><button class="fix-copy" onclick="event.stopPropagation();navigator.clipboard.writeText(${JSON.stringify(v.fix)}).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='copy',1500)})">copy</button></div>`:"";
+  const fixHtml=v.fix?`<div class="fix-cmd"><code>$ ${esc(v.fix)}</code><button class="fix-copy" data-fix="${esc(v.fix)}" onclick="event.stopPropagation();navigator.clipboard.writeText(this.dataset.fix).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='copy',1500)})">copy</button></div>`:"";
   const sharePath=hasCvePage(v)?`/cve/${v.id}.html`:`/#q=${encodeURIComponent(v.id)}`;
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
   const watchedCls=isWatched(v)?" watched":"";

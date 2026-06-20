@@ -3918,6 +3918,30 @@ def main():
     log("NVD enrichment for unscored CVEs...")
     enrich_with_nvd(vulns)
 
+    # --- Score propagation: advisory entries (USN/DSA/RHSA) get max CVSS from their CVEs ---
+    # Ubuntu/Debian/vendor advisories use advisory IDs (not CVE IDs) so enrich_with_nvd
+    # skips them. Build a score index from all scored CVE entries and propagate to advisories.
+    cve_score_index = {
+        v["id"]: (v["score"], v["severity"])
+        for v in vulns
+        if v["id"].startswith("CVE-") and v.get("score") is not None
+    }
+    advisory_scored = 0
+    for v in vulns:
+        if v.get("score") is not None:
+            continue
+        if not v.get("affected"):
+            continue
+        best = max(
+            (cve_score_index[cid] for cid in v["affected"] if cid in cve_score_index),
+            key=lambda t: t[0],
+            default=None,
+        )
+        if best:
+            v["score"], v["severity"] = best
+            advisory_scored += 1
+    log(f"  Advisory score propagation: {advisory_scored} entries scored")
+
     # --- Patch status via OSV.dev (fresh CVEs only to limit API calls) ---
     log("Fetching patch status...")
     fresh_cve_ids = [v["id"] for v in fresh if v["id"].startswith("CVE-")]

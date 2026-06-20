@@ -2167,8 +2167,10 @@ const DATES=__DATES_JSON__;
 const NEWS=__NEWS_JSON__;
 const HEALTH=__HEALTH__;
 
-D.forEach(v=>{v._ts=v.published?new Date(v.published).getTime()||0:0});
-NEWS.forEach(n=>{n._ts=n.published?new Date(n.published).getTime()||0:0});
+// Treat bare ISO-8601 (no tz suffix) as UTC so historical entries sort correctly
+function _toTS(s){if(!s)return 0;var d=new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(s)?s:s+"Z");return d.getTime()||0;}
+D.forEach(v=>{v._ts=_toTS(v.published)});
+NEWS.forEach(n=>{n._ts=_toTS(n.published)});
 
 // "New since last visit" — mark items published after the user's previous session
 const _lastVisit=parseInt(localStorage.getItem("vf_lastVisit")||"0");
@@ -2579,7 +2581,7 @@ datePicker.addEventListener("change",async()=>{
     const resp=await fetch("historical/"+val+".json");
     if(!resp.ok)throw new Error("HTTP "+resp.status);
     const data=await resp.json();
-    data.forEach(v=>{v._ts=v.published?new Date(v.published).getTime()||0:0;});
+    data.forEach(v=>{v._ts=_toTS(v.published);});
     D=data;
     histBanner.textContent="Snapshot: "+val+" — "+data.length.toLocaleString()+" entries";
     if(aRange!=="ALL"){
@@ -3070,6 +3072,11 @@ def load_historical(days=30):
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
+            # Ensure all published dates carry UTC Z so browser Date() parses correctly
+            for v in data:
+                p = v.get("published") or ""
+                if p and not (p.endswith("Z") or "+" in p[-7:]):
+                    v["published"] = p + "Z"
             results.extend(data)
             log(f"  Loaded {len(data)} entries ← {path}")
         except Exception as ex:

@@ -2155,14 +2155,14 @@ __CWE_INDEX_HTML__
   </div>
 </div>
 
+<div id="vf-loading" style="text-align:center;padding:3rem 1rem;color:#64748b;font-size:.9rem">Loading vulnerabilities…</div>
 <div id="grid"></div>
 <div id="empty"><h2>No results</h2><p>Try a different keyword or clear the filters.</p></div>
 <div id="sentinel"></div>
 <div id="news-panel"></div>
 
-<script type="application/json" id="vf-data">__JSON__</script>
 <script>
-let D=JSON.parse(document.getElementById('vf-data').textContent);
+let D=[];
 const D_TODAY=D;
 const DATES=__DATES_JSON__;
 const NEWS=__NEWS_JSON__;
@@ -2170,14 +2170,9 @@ const HEALTH=__HEALTH__;
 
 // Treat bare ISO-8601 (no tz suffix) as UTC so historical entries sort correctly
 function _toTS(s){if(!s)return 0;var d=new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(s)?s:s+"Z");return d.getTime()||0;}
-D.forEach(v=>{v._ts=_toTS(v.published)});
 NEWS.forEach(n=>{n._ts=_toTS(n.published)});
 
-// "New since last visit" — mark items published after the user's previous session
 const _lastVisit=parseInt(localStorage.getItem("vf_lastVisit")||"0");
-if(_lastVisit>0){D.forEach(v=>{if(v._ts&&v._ts>_lastVisit)v._unread=true;});}
-setTimeout(()=>localStorage.setItem("vf_lastVisit",String(Date.now())),2000);
-
 const SEV=v=>v.severity||"UNKNOWN";
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function host(u){try{return new URL(u).hostname}catch(_){return String(u).slice(0,30)}}
@@ -2672,8 +2667,25 @@ document.getElementById("shareBtn").addEventListener("click",function(){
   }).catch(()=>prompt("Copy this link:",location.href));
 });
 
-applyHash();
-applyFilters();
+// Bootstrap: fetch vuln data then initialise
+(function(){
+  const loadEl=document.getElementById("vf-loading");
+  fetch("vulns.json").then(function(r){
+    if(!r.ok)throw new Error(r.status);
+    return r.json();
+  }).then(function(data){
+    data.forEach(function(v){D.push(v);});
+    D.forEach(v=>{v._ts=_toTS(v.published)});
+    if(_lastVisit>0){D.forEach(v=>{if(v._ts&&v._ts>_lastVisit)v._unread=true;});}
+    setTimeout(()=>localStorage.setItem("vf_lastVisit",String(Date.now())),2000);
+    if(loadEl)loadEl.style.display="none";
+    applyHash();
+    applyFilters();
+  }).catch(function(e){
+    if(loadEl){loadEl.textContent="Failed to load data — please refresh.";loadEl.style.color="#f87171";}
+    console.error("vulnfeed: fetch failed",e);
+  });
+})();
 
 // Subscribe modal — isolated so errors can't block card rendering
 try{(function(){
@@ -4158,10 +4170,6 @@ def main():
         + '</div></section>'
     )
 
-    json_blob     = (json.dumps(vulns, ensure_ascii=False, separators=(",", ":"))
-                     .replace("</", "<\\/")
-                     .replace("<!--", "\\u003C!--")
-                     .replace("<script", "\\u003Cscript").replace("<SCRIPT", "\\u003CSCRIPT"))
     news_blob     = (json.dumps(news, ensure_ascii=False, separators=(",", ":"))
                      .replace("<!--", "\\u003C!--").replace("<script", "\\u003Cscript"))
     dates_blob    = json.dumps(hist_dates)
@@ -4170,7 +4178,6 @@ def main():
     html = _HTML
     html = html.replace("__DATE__",              date_str)
     html = html.replace("__COUNT__",             str(len(vulns)))
-    html = html.replace("__JSON__",              json_blob)
     html = html.replace("__DATES_JSON__",        dates_blob)
     html = html.replace("__NEWS_JSON__",         news_blob)
     html = html.replace("__HEALTH__",            health_blob)

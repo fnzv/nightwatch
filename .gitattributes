@@ -1,0 +1,2 @@
+# CI continuously rewrites these; always keep the remote version during rebase/merge
+historical/*.json merge=ours

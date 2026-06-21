@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /historical/
+Disallow: /vulns.json
+Disallow: /vendor/*.xml
+Sitemap: https://vulnfeed.it/sitemap.xml

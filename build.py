@@ -1779,11 +1779,12 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
 
 
 def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
-                  cwe_pages=None, digest_dates=None):
-    def url_entry(loc, freq, pri):
+                  cwe_pages=None, digest_dates=None, weekly_digest_weeks=None):
+    def url_entry(loc, freq, pri, lastmod=None):
+        lm = lastmod or date_str
         return (
             f"  <url><loc>{loc}</loc>"
-            f"<lastmod>{date_str}</lastmod>"
+            f"<lastmod>{lm}</lastmod>"
             f"<changefreq>{freq}</changefreq>"
             f"<priority>{pri}</priority></url>"
         )
@@ -1799,8 +1800,12 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
         entries.append(url_entry(f"{base_url}/cwe/{cp['id']}.html", "weekly", "0.7"))
     for d in (digest_dates or []):
         entries.append(url_entry(f"{base_url}/digest/{d}.html", "weekly", "0.5"))
+    for w in (weekly_digest_weeks or []):
+        entries.append(url_entry(f"{base_url}/digest/week-{w}.html", "weekly", "0.6"))
     for v in cve_pages:
-        entries.append(url_entry(f"{base_url}/cve/{v['id']}.html", "weekly", "0.8"))
+        pub = (v.get("published") or "")[:10]
+        lm = pub if len(pub) == 10 else date_str
+        entries.append(url_entry(f"{base_url}/cve/{v['id']}.html", "weekly", "0.8", lastmod=lm))
 
     with open("sitemap.xml", "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -1812,7 +1817,14 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
 
 def write_robots(base_url=BASE_URL):
     with open("robots.txt", "w", encoding="utf-8") as f:
-        f.write(f"User-agent: *\nAllow: /\nSitemap: {base_url}/sitemap.xml\n")
+        f.write(
+            f"User-agent: *\n"
+            f"Allow: /\n"
+            f"Disallow: /historical/\n"
+            f"Disallow: /vulns.json\n"
+            f"Disallow: /vendor/*.xml\n"
+            f"Sitemap: {base_url}/sitemap.xml\n"
+        )
     log("  Written: robots.txt")
 
 
@@ -4306,6 +4318,220 @@ def write_cwe_pages(vulns, date_str, base_url=BASE_URL):
 
 
 # ---------------------------------------------------------------------------
+# Weekly digest pages
+# ---------------------------------------------------------------------------
+
+_WEEKLY_DIGEST_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>Top Security Vulnerabilities __WEEK_ISO__ &mdash; __WEEK_LABEL__ | vulnfeed</title>
+<meta name="description" content="__TOTAL__ vulnerabilities tracked in __WEEK_LABEL__: __N_CRIT__ critical, __N_HIGH__ high, __N_EXPL__ actively exploited. Weekly CVE digest by vulnfeed.">
+<link rel="canonical" href="__BASE_URL__/digest/week-__WEEK_ISO__.html">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Top Security Vulnerabilities __WEEK_ISO__","description":"__TOTAL__ vulnerabilities tracked in __WEEK_LABEL__: __N_CRIT__ critical, __N_HIGH__ high severity.","url":"__BASE_URL__/digest/week-__WEEK_ISO__.html","publisher":{"@type":"Organization","name":"vulnfeed","url":"__BASE_URL__"}}</script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+.wrap{max-width:1100px;margin:0 auto;padding:2rem}
+h1{font-size:1.4rem;font-weight:800;margin-bottom:.25rem}
+h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:2rem 0 .75rem}
+.date-nav{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;font-size:.8rem}
+.date-nav a{color:var(--accent);text-decoration:none;font-weight:600}.date-nav a:hover{text-decoration:underline}
+.date-nav strong{color:var(--text)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;margin-bottom:2rem}
+.stat-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.stat-val{font-size:1.8rem;font-weight:800;letter-spacing:-.04em}
+.stat-lbl{font-size:.72rem;color:var(--muted);margin-top:.1rem}
+.crit-val{color:var(--crit)}.high-val{color:var(--high)}.expl-val{color:#7c3aed}
+.daily-links{margin-bottom:2rem;display:flex;flex-wrap:wrap;gap:.5rem}
+.daily-links a{font-size:.75rem;color:var(--accent);text-decoration:none;padding:.2rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--card)}
+.daily-links a:hover{border-color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:2rem}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:#f8fafc}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+.cve-id{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.cve-id:hover{text-decoration:underline}
+.sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
+.sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+.src-tag{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}
+.ttl{font-size:.78rem;color:var(--text)}
+@media(max-width:640px){.wrap{padding:1rem}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">Live feed</a>
+    <a class="hlink" href="/digest/">All digests</a>
+  </div>
+</header>
+<div class="wrap">
+  <div class="date-nav">
+    __PREV_LINK__
+    <strong>__WEEK_ISO__</strong>
+    __NEXT_LINK__
+  </div>
+  <h1>Top Security Vulnerabilities &mdash; __WEEK_LABEL__</h1>
+  <div class="stat-grid">
+    <div class="stat-box"><div class="stat-val">__TOTAL__</div><div class="stat-lbl">Total vulnerabilities</div></div>
+    <div class="stat-box"><div class="stat-val crit-val">__N_CRIT__</div><div class="stat-lbl">Critical</div></div>
+    <div class="stat-box"><div class="stat-val high-val">__N_HIGH__</div><div class="stat-lbl">High</div></div>
+    <div class="stat-box"><div class="stat-val expl-val">__N_EXPL__</div><div class="stat-lbl">Actively exploited</div></div>
+  </div>
+  <h2>Daily digests this week</h2>
+  <div class="daily-links">__DAILY_LINKS__</div>
+  <h2>Top vulnerabilities</h2>
+  __TOP_TABLE__
+</div>
+</body>
+</html>
+"""
+
+
+def _iso_week_label(week_str):
+    """Convert '2026-W25' to human-readable 'June 16–22, 2026'."""
+    try:
+        year, wnum = int(week_str[:4]), int(week_str[6:])
+        mon = datetime.strptime(f"{year}-W{wnum:02d}-1", "%G-W%V-%u")
+        sun = mon + timedelta(days=6)
+        if mon.month == sun.month:
+            return f"{mon.strftime('%B %-d')}–{sun.strftime('%-d, %Y')}"
+        return f"{mon.strftime('%B %-d')} – {sun.strftime('%B %-d, %Y')}"
+    except Exception:
+        return week_str
+
+
+def _write_single_weekly_digest(week_str, week_vulns, week_dates, all_weeks, base_url=BASE_URL):
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    sev_counts = {}
+    exploited = 0
+    seen_ids = set()
+    deduped = []
+    for v in week_vulns:
+        if v["id"] not in seen_ids:
+            seen_ids.add(v["id"])
+            deduped.append(v)
+        s = v.get("severity", "UNKNOWN")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
+        if v.get("badge") == "ACTIVELY EXPLOITED":
+            exploited += 1
+
+    top = sorted(deduped, key=lambda v: (
+        SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)))[:60]
+
+    rows = []
+    for v in top:
+        sev = v.get("severity", "UNKNOWN")
+        sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+        pub = _pub_ymd(v.get("published") or "")
+        ttl = _xe((v.get("title") or v["id"])[:120])
+        url = _xe(v.get("url", ""))
+        rows.append(
+            f'<tr><td><a class="cve-id" href="{url}" target="_blank" rel="noopener">{_xe(v["id"])}</a></td>'
+            f'<td class="ttl">{ttl}</td>'
+            f'<td><span class="sev s{sev}">{sev}</span></td>'
+            f'<td>{sc_str}</td>'
+            f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+            f'<td>{pub}</td></tr>'
+        )
+
+    table_html = (
+        '<table><tr><th>CVE / ID</th><th>Title</th><th>Severity</th>'
+        '<th>CVSS</th><th>Source</th><th>Date</th></tr>'
+        + "".join(rows) + '</table>'
+    ) if rows else '<p style="color:#64748b">No data for this week.</p>'
+
+    daily_links = "".join(
+        f'<a href="/digest/{d}.html">{d}</a>' for d in sorted(week_dates, reverse=True)
+    )
+
+    idx = all_weeks.index(week_str) if week_str in all_weeks else -1
+    prev_week = all_weeks[idx + 1] if idx >= 0 and idx + 1 < len(all_weeks) else None
+    next_week = all_weeks[idx - 1] if idx > 0 else None
+
+    prev_link = f'<a href="/digest/week-{prev_week}.html">&#8592; {prev_week}</a>' if prev_week else ""
+    next_link = f'<a href="/digest/week-{next_week}.html">{next_week} &#8594;</a>' if next_week else ""
+
+    week_label = _iso_week_label(week_str)
+    html = _WEEKLY_DIGEST_HTML
+    html = html.replace("__WEEK_ISO__",   week_str)
+    html = html.replace("__WEEK_LABEL__", week_label)
+    html = html.replace("__TOTAL__",      str(len(deduped)))
+    html = html.replace("__N_CRIT__",     str(sev_counts.get("CRITICAL", 0)))
+    html = html.replace("__N_HIGH__",     str(sev_counts.get("HIGH", 0)))
+    html = html.replace("__N_EXPL__",     str(exploited))
+    html = html.replace("__TOP_TABLE__",  table_html)
+    html = html.replace("__DAILY_LINKS__", daily_links)
+    html = html.replace("__PREV_LINK__",  prev_link)
+    html = html.replace("__NEXT_LINK__",  next_link)
+    html = html.replace("__BASE_URL__",   base_url)
+
+    with open(os.path.join("digest", f"week-{week_str}.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def write_weekly_digest_pages(hist_dates, date_str, base_url=BASE_URL):
+    """Generate one page per ISO week from available historical snapshots."""
+    os.makedirs("digest", exist_ok=True)
+
+    # Group dates by ISO week
+    week_to_dates = {}
+    all_dates = sorted({date_str} | set(hist_dates), reverse=True)
+    for d in all_dates:
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            iso = dt.isocalendar()
+            week_str = f"{iso[0]}-W{iso[1]:02d}"
+            week_to_dates.setdefault(week_str, []).append(d)
+        except Exception:
+            continue
+
+    # Only generate weeks where we have at least 3 days of data
+    eligible_weeks = sorted(
+        [w for w, dates in week_to_dates.items() if len(dates) >= 3],
+        reverse=True,
+    )
+
+    for week_str in eligible_weeks:
+        out_path = os.path.join("digest", f"week-{week_str}.html")
+        week_dates = week_to_dates[week_str]
+
+        # Merge vulns from all days in this week
+        week_vulns = []
+        for d in week_dates:
+            if d == date_str:
+                continue  # fresh data already in today's snapshot path
+            hist_path = os.path.join(HISTORICAL_DIR, f"{d}.json")
+            if not os.path.exists(hist_path):
+                continue
+            try:
+                with open(hist_path, encoding="utf-8") as hf:
+                    week_vulns.extend(json.load(hf))
+            except Exception:
+                pass
+
+        if not week_vulns:
+            continue
+
+        _write_single_weekly_digest(week_str, week_vulns, week_dates, eligible_weeks, base_url)
+
+    log(f"  Written: {len(eligible_weeks)} weekly digest pages → digest/")
+    return eligible_weeks
+
+
 # Daily digest pages
 # ---------------------------------------------------------------------------
 
@@ -4391,8 +4617,8 @@ _DIGEST_INDEX_HTML = """\
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
-<title>Daily Security Digest Archive | vulnfeed</title>
-<meta name="description" content="Archive of daily security vulnerability digests aggregated from NVD, CISA KEV, Microsoft, Fortinet, Juniper and more.">
+<title>Security Digest Archive — Daily &amp; Weekly CVE Digests | vulnfeed</title>
+<meta name="description" content="Archive of daily and weekly security vulnerability digests aggregated from NVD, CISA KEV, Microsoft, Fortinet, Juniper and more.">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}
@@ -4402,11 +4628,13 @@ header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;
 .hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
 .wrap{max-width:800px;margin:0 auto;padding:2rem}
 h1{font-size:1.35rem;font-weight:800;margin-bottom:.5rem}
+h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:2rem 0 .75rem}
 .sub{font-size:.8rem;color:var(--muted);margin-bottom:2rem}
 .digest-list{list-style:none;display:grid;gap:.5rem}
 .digest-list li a{display:flex;align-items:center;justify-content:space-between;padding:.65rem 1rem;background:var(--card);border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:.85rem;transition:border-color .15s}
 .digest-list li a:hover{border-color:var(--accent)}
 .digest-list li a span{font-size:.72rem;color:var(--muted);font-weight:400}
+.weekly-badge{display:inline-block;background:#2563eb;color:#fff;font-size:.6rem;font-weight:700;padding:.06rem .3rem;border-radius:3px;margin-left:.4rem;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -4415,8 +4643,11 @@ h1{font-size:1.35rem;font-weight:800;margin-bottom:.5rem}
   <a class="hlink" href="/">&#8592; Live feed</a>
 </header>
 <div class="wrap">
-  <h1>Daily Security Digest</h1>
-  <p class="sub">Daily snapshots of vulnerabilities tracked by vulnfeed.</p>
+  <h1>Security Digest Archive</h1>
+  <p class="sub">Daily and weekly snapshots of vulnerabilities tracked by vulnfeed.</p>
+  <h2>Weekly digests</h2>
+  <ul class="digest-list">__WEEKLY_LINKS__</ul>
+  <h2>Daily digests</h2>
   <ul class="digest-list">__DIGEST_LINKS__</ul>
 </div>
 </body>
@@ -4503,22 +4734,36 @@ def write_digest_pages(fresh, date_str, hist_dates, base_url=BASE_URL):
         except Exception as ex:
             log(f"  Digest backfill error ({hist_date}): {ex}")
 
-    # Index page
+    # Index page (written later by write_digest_index after weekly pages are ready)
     existing = sorted(
         [f[:-5] for f in os.listdir("digest")
          if re.match(r"^\d{4}-\d{2}-\d{2}\.html$", f)],
         reverse=True,
     )
-    links = "".join(
-        f'<li><a href="/digest/{d}.html">{d}<span>daily digest</span></a></li>'
-        for d in existing
-    )
-    idx_html = _DIGEST_INDEX_HTML.replace("__DIGEST_LINKS__", links)
-    with open(os.path.join("digest", "index.html"), "w", encoding="utf-8") as f:
-        f.write(idx_html)
-
     log(f"  Written: {len(existing)} digest pages → digest/")
     return existing
+
+
+def write_digest_index(daily_dates, weekly_weeks, base_url=BASE_URL):
+    """Write digest/index.html listing both weekly and daily digests."""
+    os.makedirs("digest", exist_ok=True)
+    daily_links = "".join(
+        f'<li><a href="/digest/{d}.html">{d}<span>daily digest</span></a></li>'
+        for d in daily_dates
+    )
+    weekly_links = "".join(
+        f'<li><a href="/digest/week-{w}.html">'
+        f'{w} <span class="weekly-badge">WEEKLY</span>'
+        f'<span>{_iso_week_label(w)}</span></a></li>'
+        for w in weekly_weeks
+    )
+    idx_html = (
+        _DIGEST_INDEX_HTML
+        .replace("__DIGEST_LINKS__", daily_links)
+        .replace("__WEEKLY_LINKS__", weekly_links or '<li style="color:#64748b;padding:.5rem">No weekly digests yet.</li>')
+    )
+    with open(os.path.join("digest", "index.html"), "w", encoding="utf-8") as f:
+        f.write(idx_html)
 
 
 # ---------------------------------------------------------------------------
@@ -4736,8 +4981,12 @@ def main():
     cwe_pages = write_cwe_pages(vulns, date_str)
     log("Writing digest pages...")
     digest_dates = write_digest_pages(fresh, date_str, hist_dates)
+    log("Writing weekly digest pages...")
+    weekly_weeks = write_weekly_digest_pages(hist_dates, date_str)
+    write_digest_index(digest_dates, weekly_weeks)
     write_sitemap(cve_pages, date_str, vendor_pages=vendor_pages,
-                  cwe_pages=cwe_pages, digest_dates=digest_dates)
+                  cwe_pages=cwe_pages, digest_dates=digest_dates,
+                  weekly_digest_weeks=weekly_weeks)
 
     # --- Static HTML for SEO pre-render ---
     critical_ids = {v["id"] for v in cve_pages}

@@ -1,0 +1,14 @@
+{
+  "name": "vulnfeed",
+  "short_name": "vulnfeed",
+  "description": "Daily security vulnerability feed — CVEs from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes and more.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {"src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ],
+  "categories": ["security", "utilities"],
+  "lang": "en"
+}

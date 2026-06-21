@@ -1,6 +1,6 @@
 # vulnfeed
 
-Security vulnerability aggregator — live at **[nightwatch.sami.pw](https://nightwatch.sami.pw)**
+Security vulnerability aggregator — live at **[vulnfeed.it](https://vulnfeed.it)**
 
 Scrapes multiple security sources every 4 hours and builds a single static HTML page with client-side search and filtering. No backend, no database.
 
@@ -36,6 +36,6 @@ python3 build.py
 
 ## Deployment
 
-The repo uses GitHub Pages + a Cloudflare DNS CNAME (DNS-only, no proxy) pointing `nightwatch.sami.pw` → `fnzv.github.io`.
+The repo uses GitHub Pages + a Cloudflare DNS CNAME (DNS-only, no proxy) pointing `vulnfeed.it` → `fnzv.github.io`.
 
 `index.html` is in `.gitignore` — it's generated at build time by the workflow.

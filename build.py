@@ -1643,6 +1643,11 @@ ul.aff-list li{font-family:ui-monospace,monospace;font-size:.82rem;background:#f
 .fix-box button{margin-top:.55rem;background:none;border:1px solid #1e3a5f;color:#64748b;
   border-radius:4px;padding:.2rem .6rem;font-size:.78rem;cursor:pointer}
 .fix-box button:hover{color:#86efac;border-color:#86efac}
+.explainer{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
+  padding:1rem 1.2rem;margin-bottom:1.4rem;font-size:.9rem;line-height:1.7;color:#0c4a6e}
+.explainer strong{color:#0369a1}
+.explainer .expl-kev{color:#6d28d9;font-weight:700}
+.explainer .expl-poc{color:#dc2626;font-weight:700}
 </style>
 </head>
 <body>
@@ -1663,6 +1668,7 @@ __CVE_REFS_HTML__
     Source: <strong>__CVE_SRC_ESC__</strong> &middot;
     Feed updated: <strong>__BUILD_DATE__</strong>
   </div>
+  __CVE_EXPLAINER_HTML__
   <div class="cta">
     <a href="__BASE_URL__/">vulnfeed</a> aggregates __TOTAL_COUNT__ vulnerabilities from NVD, CISA KEV,
     Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack &mdash; updated every 4 hours.
@@ -1671,6 +1677,69 @@ __CVE_REFS_HTML__
 </body>
 </html>
 """
+
+
+def _cve_explainer(v, pub_fmt):
+    """Generate a plain-English summary paragraph for a CVE page."""
+    sev       = (v.get("severity") or "UNKNOWN").lower()
+    score     = v.get("score")
+    src       = v.get("source") or ""
+    badge     = v.get("badge") or ""
+    aff       = (v.get("affected") or [])
+    fix       = v.get("fix") or ""
+    patch     = v.get("patch")
+    poc       = v.get("poc")
+    epss      = v.get("epss")
+    epss_pct  = v.get("epss_pct")
+
+    parts = []
+
+    # Opening — severity + score + date + source
+    score_str = f" with a CVSS score of <strong>{score:.1f}</strong>" if score is not None else ""
+    src_str   = f" via <strong>{_xe(src)}</strong>" if src else ""
+    parts.append(
+        f"This <strong>{_xe(sev)}</strong> severity vulnerability{score_str} "
+        f"was published on <strong>{_xe(pub_fmt)}</strong>{src_str}."
+    )
+
+    # Active exploitation
+    if badge == "ACTIVELY EXPLOITED":
+        parts.append(
+            '<span class="expl-kev">&#9888; This vulnerability is in the CISA Known Exploited '
+            'Vulnerabilities (KEV) catalog — it is being actively exploited in the wild.</span>'
+        )
+
+    # PoC
+    if poc:
+        parts.append(
+            '<span class="expl-poc">&#128680; A public proof-of-concept exploit is available on GitHub.</span>'
+        )
+
+    # EPSS — only mention if meaningful (>=5%)
+    if epss is not None and epss_pct is not None and epss >= 0.05:
+        parts.append(
+            f"EPSS score: <strong>{epss:.1%}</strong> "
+            f"(top <strong>{100 - epss_pct:.0f}%</strong> of all CVEs by exploitation probability)."
+        )
+
+    # Patch / remediation
+    if patch is True and fix:
+        parts.append("A patch is available — see the remediation command below.")
+    elif patch is True:
+        parts.append("A patch is available from the vendor.")
+    elif patch is False:
+        parts.append("No patch is currently available.")
+    elif fix:
+        parts.append("A remediation command is available below.")
+
+    # Affected products (first 3, with overflow count)
+    if aff:
+        shown   = [_xe(a) for a in aff[:3]]
+        rest    = len(aff) - 3
+        aff_str = ", ".join(shown) + (f" and {rest} more" if rest > 0 else "")
+        parts.append(f"Affected: <strong>{aff_str}</strong>.")
+
+    return '<div class="explainer">' + " ".join(parts) + "</div>"
 
 
 def write_cve_pages(vulns, date_str, base_url=BASE_URL):
@@ -1752,8 +1821,13 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
             "publisher": {"@type": "Organization", "name": "vulnfeed", "url": base_url},
         }
 
+        sev_label   = sev.capitalize()
+        score_label = f" {score:.1f}" if score is not None else ""
+        title_tag   = f"{cve_id} — {sev_label}{score_label} — {title_short} | vulnfeed"
+        explainer   = _cve_explainer(v, pub_fmt)
+
         page = _CVE_PAGE_HTML
-        page = page.replace("__CVE_TITLE_TAG__",      _xe(f"{cve_id}: {title_short} | vulnfeed"))
+        page = page.replace("__CVE_TITLE_TAG__",      _xe(title_tag))
         page = page.replace("__CVE_META_DESC__",       meta_desc)
         page = page.replace("__CVE_OG_TITLE__",        _xe(f"{cve_id}: {title_short}"))
         page = page.replace("__CVE_CANONICAL__",       f"{base_url}/cve/{cve_id}.html")
@@ -1770,6 +1844,7 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         page = page.replace("__BUILD_DATE__",          date_str)
         page = page.replace("__TOTAL_COUNT__",         str(total))
         page = page.replace("__BASE_URL__",            base_url)
+        page = page.replace("__CVE_EXPLAINER_HTML__",  explainer)
 
         with open(os.path.join("cve", f"{cve_id}.html"), "w", encoding="utf-8") as f:
             f.write(page)

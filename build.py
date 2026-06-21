@@ -2686,7 +2686,22 @@ document.getElementById("shareBtn").addEventListener("click",function(){
   });
 })();
 
-// Subscribe modal — isolated so errors can't block card rendering
+
+</script>
+<div id="sub-modal" role="dialog" aria-modal="true" aria-label="Subscribe to weekly digest">
+  <div id="sub-modal-box">
+    <button id="sub-close" aria-label="Close">&times;</button>
+    <div style="font-size:1.6rem;margin-bottom:.5rem">&#128231;</div>
+    <h2>Weekly Digest</h2>
+    <p>Top CVEs every Monday. No spam, unsubscribe anytime.</p>
+    <form id="sub-form">
+      <input type="email" name="email" placeholder="you@company.com" required>
+      <button type="submit">Subscribe</button>
+    </form>
+    <div id="sub-modal-thanks">&#10003; Subscribed &mdash; see you Monday!</div>
+  </div>
+</div>
+<script>
 try{(function(){
   const ob=document.getElementById("sub-open-btn");
   if(localStorage.getItem("vf_subscribed")){if(ob)ob.style.display="none";return;}
@@ -2718,19 +2733,6 @@ try{(function(){
   });
 })()}catch(_){}
 </script>
-<div id="sub-modal" role="dialog" aria-modal="true" aria-label="Subscribe to weekly digest">
-  <div id="sub-modal-box">
-    <button id="sub-close" aria-label="Close">&times;</button>
-    <div style="font-size:1.6rem;margin-bottom:.5rem">&#128231;</div>
-    <h2>Weekly Digest</h2>
-    <p>Top CVEs every Monday. No spam, unsubscribe anytime.</p>
-    <form id="sub-form">
-      <input type="email" name="email" placeholder="you@company.com" required>
-      <button type="submit">Subscribe</button>
-    </form>
-    <div id="sub-modal-thanks">&#10003; Subscribed &mdash; see you Monday!</div>
-  </div>
-</div>
 __STATIC_CVE_HTML__
 </body>
 </html>

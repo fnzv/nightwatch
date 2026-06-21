@@ -1676,6 +1676,23 @@ __CVE_REFS_HTML__
     <a href="__BASE_URL__/">vulnfeed</a> aggregates __TOTAL_COUNT__ vulnerabilities from NVD, CISA KEV,
     Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack &mdash; updated every 4 hours.
   </div>
+  <div style="margin-top:2.5rem">
+    <script src="https://giscus.app/client.js"
+      data-repo="fnzv/nightwatch"
+      data-repo-id="R_kgDOS6ts2g"
+      data-category="General"
+      data-category-id="DIC_kwDOS6ts2s4C_m74"
+      data-mapping="pathname"
+      data-strict="0"
+      data-reactions-enabled="1"
+      data-emit-metadata="0"
+      data-input-position="bottom"
+      data-theme="preferred_color_scheme"
+      data-lang="it"
+      crossorigin="anonymous"
+      async>
+    </script>
+  </div>
 </main>
 <script>if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js")</script>
 </body>

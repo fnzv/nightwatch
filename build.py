@@ -1790,6 +1790,7 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
 
     entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
+    entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
     entries.append(url_entry(f"{base_url}/digest/", "daily", "0.6"))
     for vp in (vendor_pages or []):
         entries.append(url_entry(f"{base_url}/vendor/{vp['slug']}.html", "daily", "0.7"))
@@ -2072,6 +2073,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <div style="margin-top:.5rem;display:flex;gap:.4rem;align-items:center;justify-content:flex-end;flex-wrap:wrap">
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
       <a class="hlink" href="/stats.html">Stats</a>
+      <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
     </div>
@@ -3269,6 +3271,292 @@ tr:hover td{background:#f8fafc}
 """
 
 
+def write_search_page(vulns, base_url=BASE_URL):
+    sources = sorted(set(v.get("source", "") for v in vulns if v.get("source")))
+    src_opts = "\n".join(
+        f'<option value="{_xe(s)}">{_xe(s)}</option>' for s in sources
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>vulnfeed &mdash; Advanced Search</title>
+<meta name="description" content="Advanced CVE search — filter by severity, CVSS score, EPSS, source, date range and more.">
+<link rel="canonical" href="{base_url}/search.html">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;font-size:14px}}
+header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}}
+.logo{{font-size:1.2rem;font-weight:800;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
+.hlink{{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}}
+.hlink:hover{{border-color:#60a5fa;background:rgba(96,165,250,.08)}}
+.wrap{{max-width:1060px;margin:0 auto;padding:2rem}}
+/* Search form */
+.sf-panel{{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}}
+.sf-panel h1{{font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:1.1rem}}
+.sf-row{{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem}}
+.sf-field{{display:flex;flex-direction:column;gap:.28rem;min-width:160px}}
+.sf-field.wide{{flex:1 1 280px}}
+.sf-field label{{font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}}
+.sf-field input[type=text],.sf-field input[type=number],.sf-field input[type=date],.sf-field select{{padding:.42rem .65rem;border:1px solid var(--border);border-radius:6px;font-size:.84rem;color:var(--text);background:var(--bg);outline:none;transition:border-color .15s}}
+.sf-field input:focus,.sf-field select:focus{{border-color:var(--accent)}}
+.sf-checks{{display:flex;flex-wrap:wrap;gap:.4rem .9rem;padding-top:.15rem}}
+.sf-checks label{{display:flex;align-items:center;gap:.35rem;font-size:.8rem;cursor:pointer;white-space:nowrap}}
+.sf-checks input{{accent-color:var(--accent);width:13px;height:13px}}
+.sf-actions{{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.25rem}}
+.sf-actions button{{padding:.42rem .9rem;border-radius:6px;font-size:.82rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text);transition:background .15s,border-color .15s}}
+.sf-actions button:hover{{background:#f1f5f9;border-color:#94a3b8}}
+#sf-submit{{background:var(--accent);color:#fff;border-color:var(--accent)}}
+#sf-submit:hover{{background:#1d4ed8;border-color:#1d4ed8}}
+#sf-count{{margin-left:auto;font-size:.78rem;color:var(--muted)}}
+/* Result cards */
+#sf-results{{display:grid;gap:.6rem}}
+.rc{{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.85rem 1rem;display:grid;grid-template-columns:auto 1fr;gap:.5rem .9rem;align-items:start;text-decoration:none;color:inherit;transition:border-color .15s,box-shadow .15s;position:relative}}
+.rc:hover{{border-color:var(--accent);box-shadow:0 2px 8px rgba(37,99,235,.08)}}
+.rc-id{{font-family:ui-monospace,monospace;font-size:.8rem;font-weight:700;color:var(--accent);white-space:nowrap}}
+.rc-title{{font-size:.84rem;font-weight:600;line-height:1.4;color:var(--text)}}
+.rc-meta{{grid-column:2;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.1rem}}
+.rb{{display:inline-block;padding:.06rem .32rem;border-radius:3px;font-size:.63rem;font-weight:700;color:#fff;text-transform:uppercase}}
+.rbCRITICAL{{background:var(--crit)}}.rbHIGH{{background:var(--high)}}.rbMEDIUM{{background:var(--med)}}.rbLOW{{background:var(--low)}}.rbUNKNOWN{{background:var(--unk)}}
+.rb-src{{background:#334155;color:#cbd5e1}}.rb-kev{{background:#7c3aed}}.rb-score{{background:#0369a1}}.rb-epss{{background:#0d9488}}
+.rc-desc{{grid-column:2;font-size:.78rem;color:var(--muted);line-height:1.5;margin-top:.1rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
+@media(max-width:600px){{.wrap{{padding:1rem}}.sf-row{{flex-direction:column}}}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">vuln<em>feed</em></div>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <a class="hlink" href="/">&#8592; Feed</a>
+    <a class="hlink" href="/stats.html">Stats</a>
+    <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
+  </div>
+</header>
+<div class="wrap">
+<div class="sf-panel">
+  <h1>Advanced Search</h1>
+  <form id="sf" autocomplete="off">
+    <div class="sf-row">
+      <div class="sf-field wide"><label>Keyword / CVE ID</label>
+        <input type="text" id="sf-q" placeholder='e.g. openstack, CVE-2024-1234, nginx'></div>
+      <div class="sf-field"><label>Source</label>
+        <select id="sf-src"><option value="">All sources</option>{src_opts}</select></div>
+    </div>
+    <div class="sf-row">
+      <div class="sf-field"><label>Severity</label>
+        <div class="sf-checks">
+          <label><input type="checkbox" name="sev" value="CRITICAL"> Critical</label>
+          <label><input type="checkbox" name="sev" value="HIGH"> High</label>
+          <label><input type="checkbox" name="sev" value="MEDIUM"> Medium</label>
+          <label><input type="checkbox" name="sev" value="LOW"> Low</label>
+        </div></div>
+      <div class="sf-field"><label>CVSS &ge;</label>
+        <input type="number" id="sf-score" min="0" max="10" step="0.1" placeholder="e.g. 7.5" style="width:110px"></div>
+      <div class="sf-field"><label>EPSS &ge; %ile</label>
+        <input type="number" id="sf-epss" min="0" max="100" step="1" placeholder="e.g. 50" style="width:110px"></div>
+    </div>
+    <div class="sf-row">
+      <div class="sf-field"><label>Published from</label>
+        <input type="date" id="sf-from"></div>
+      <div class="sf-field"><label>Published to</label>
+        <input type="date" id="sf-to"></div>
+      <div class="sf-field" style="justify-content:flex-end;padding-bottom:.1rem"><label>&nbsp;</label>
+        <div class="sf-checks">
+          <label><input type="checkbox" id="sf-kev"> KEV &mdash; actively exploited only</label>
+          <label><input type="checkbox" id="sf-new"> New since yesterday only</label>
+        </div></div>
+    </div>
+    <div class="sf-actions">
+      <button type="submit" id="sf-submit">Search</button>
+      <button type="button" id="sf-clear">Clear</button>
+      <button type="button" id="sf-copy">Copy link</button>
+      <button type="button" id="sf-csv" style="display:none">Export CSV</button>
+      <span id="sf-count"></span>
+    </div>
+  </form>
+</div>
+<div id="sf-results"></div>
+</div>
+<script>
+(function(){{
+  const BASE="{base_url}";
+  let D=[], loaded=false, lastResults=[];
+
+  function esc(s){{return(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}}
+  function toTS(s){{if(!s)return 0;try{{return new Date(/Z|[+-]\d\d:/.test(s)?s:s+"Z").getTime();}}catch(_){{return 0;}}}}
+
+  // Read/write URL params
+  function getParams(){{
+    const p=new URLSearchParams(location.search);
+    return {{
+      q:p.get("q")||"",
+      src:p.get("src")||"",
+      sev:(p.get("sev")||"").split(",").filter(Boolean),
+      score:p.get("score")||"",
+      epss:p.get("epss")||"",
+      from:p.get("from")||"",
+      to:p.get("to")||"",
+      kev:p.get("kev")==="1",
+      new_:p.get("new")==="1",
+    }};
+  }}
+  function setParams(f){{
+    const p=new URLSearchParams();
+    if(f.q)p.set("q",f.q);
+    if(f.src)p.set("src",f.src);
+    if(f.sev.length)p.set("sev",f.sev.join(","));
+    if(f.score)p.set("score",f.score);
+    if(f.epss)p.set("epss",f.epss);
+    if(f.from)p.set("from",f.from);
+    if(f.to)p.set("to",f.to);
+    if(f.kev)p.set("kev","1");
+    if(f.new_)p.set("new","1");
+    const url=location.pathname+(p.toString()?"?"+p:"");
+    history.replaceState(null,"",url);
+  }}
+
+  function readForm(){{
+    return {{
+      q:document.getElementById("sf-q").value.trim(),
+      src:document.getElementById("sf-src").value,
+      sev:[...document.querySelectorAll('[name=sev]:checked')].map(c=>c.value),
+      score:document.getElementById("sf-score").value,
+      epss:document.getElementById("sf-epss").value,
+      from:document.getElementById("sf-from").value,
+      to:document.getElementById("sf-to").value,
+      kev:document.getElementById("sf-kev").checked,
+      new_:document.getElementById("sf-new").checked,
+    }};
+  }}
+  function fillForm(f){{
+    document.getElementById("sf-q").value=f.q;
+    document.getElementById("sf-src").value=f.src;
+    document.querySelectorAll('[name=sev]').forEach(c=>{{c.checked=f.sev.includes(c.value);}});
+    document.getElementById("sf-score").value=f.score;
+    document.getElementById("sf-epss").value=f.epss;
+    document.getElementById("sf-from").value=f.from;
+    document.getElementById("sf-to").value=f.to;
+    document.getElementById("sf-kev").checked=f.kev;
+    document.getElementById("sf-new").checked=f.new_;
+  }}
+
+  function match(v,f){{
+    if(f.src&&v.source!==f.src)return false;
+    if(f.sev.length&&!f.sev.includes(v.severity||"UNKNOWN"))return false;
+    if(f.kev&&!v.kev)return false;
+    if(f.new_&&!v._new)return false;
+    if(f.score){{const mn=parseFloat(f.score);if(isNaN(mn)||(v.score==null||v.score<mn))return false;}}
+    if(f.epss){{const mn=parseFloat(f.epss);if(isNaN(mn)||(v.epss_pct==null||v.epss_pct<mn))return false;}}
+    if(f.from||f.to){{
+      const ts=toTS(v.published);
+      if(f.from&&ts<new Date(f.from).getTime())return false;
+      if(f.to&&ts>new Date(f.to).getTime()+86399999)return false;
+    }}
+    if(f.q){{
+      const words=f.q.toLowerCase().split(/\s+/);
+      const hay=[v.id,v.title,v.description,...(v.affected||[]),...(v.references||[])].join(" ").toLowerCase();
+      if(!words.every(w=>hay.includes(w)))return false;
+    }}
+    return true;
+  }}
+
+  function renderCard(v){{
+    const sev=v.severity||"UNKNOWN";
+    const score=v.score!=null?`<span class="rb rb-score">CVSS ${{v.score.toFixed(1)}}</span>`:"";
+    const epss=v.epss_pct!=null?`<span class="rb rb-epss">EPSS ${{v.epss_pct.toFixed(1)}}%</span>`:"";
+    const kev=v.kev?`<span class="rb rb-kev">KEV</span>`:"";
+    const desc=v.description?`<div class="rc-desc">${{esc(v.description)}}</div>`:"";
+    return `<a class="rc" href="${{BASE}}/cve/${{esc(v.id)}}.html" target="_blank" rel="noopener">
+      <div class="rc-id">${{esc(v.id)}}</div>
+      <div class="rc-title">${{esc(v.title||v.id)}}</div>
+      <div class="rc-meta">
+        <span class="rb rb${{sev}}">${{sev}}</span>
+        <span class="rb rb-src">${{esc(v.source||"")}}</span>
+        ${{score}}${{epss}}${{kev}}
+        <span style="font-size:.72rem;color:#94a3b8;margin-left:auto">${{esc(v.published||"").slice(0,10)}}</span>
+      </div>
+      ${{desc}}
+    </a>`;
+  }}
+
+  function runSearch(){{
+    if(!loaded){{document.getElementById("sf-count").textContent="Loading…";return;}}
+    const f=readForm();
+    setParams(f);
+    const hasFilter=f.q||f.src||f.sev.length||f.score||f.epss||f.from||f.to||f.kev||f.new_;
+    const resultsEl=document.getElementById("sf-results");
+    const countEl=document.getElementById("sf-count");
+    const csvBtn=document.getElementById("sf-csv");
+    if(!hasFilter){{
+      resultsEl.innerHTML="";
+      countEl.textContent="";
+      csvBtn.style.display="none";
+      lastResults=[];
+      return;
+    }}
+    const res=D.filter(v=>match(v,f)).slice(0,500);
+    lastResults=res;
+    countEl.textContent=res.length===500?`500+ results (showing first 500)`:`${{res.length.toLocaleString()}} result${{res.length!==1?"s":""}}`;
+    csvBtn.style.display=res.length?"":"none";
+    resultsEl.innerHTML=res.map(renderCard).join("");
+  }}
+
+  function exportCSV(){{
+    const cols=["id","title","severity","score","epss_pct","kev","source","published","url"];
+    const header=cols.join(",");
+    const rows=lastResults.map(v=>cols.map(c=>{{
+      const val=v[c]??"";;
+      return typeof val==="string"?`"${{val.replace(/"/g,'""')}}"`:(typeof val==="boolean"?val?"yes":"":""+val);
+    }}).join(","));
+    const blob=new Blob([header+"\n"+rows.join("\n")],{{type:"text/csv"}});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="vulnfeed-search.csv";
+    a.click();
+  }}
+
+  // Wire up
+  document.getElementById("sf").addEventListener("submit",function(e){{e.preventDefault();runSearch();}});
+  document.getElementById("sf-clear").addEventListener("click",function(){{
+    fillForm({{q:"",src:"",sev:[],score:"",epss:"",from:"",to:"",kev:false,new_:false}});
+    document.getElementById("sf-results").innerHTML="";
+    document.getElementById("sf-count").textContent="";
+    document.getElementById("sf-csv").style.display="none";
+    history.replaceState(null,"",location.pathname);
+    lastResults=[];
+  }});
+  document.getElementById("sf-copy").addEventListener("click",function(){{
+    navigator.clipboard.writeText(location.href).then(()=>{{
+      const b=document.getElementById("sf-copy");
+      const t=b.textContent;b.textContent="Copied!";setTimeout(()=>b.textContent=t,1500);
+    }});
+  }});
+  document.getElementById("sf-csv").addEventListener("click",exportCSV);
+
+  // Load data
+  fetch("vulns.json").then(r=>{{if(!r.ok)throw new Error(r.status);return r.json();}})
+    .then(data=>{{
+      data.forEach(v=>D.push(v));
+      loaded=true;
+      const init=getParams();
+      const hasInit=init.q||init.src||init.sev.length||init.score||init.epss||init.from||init.to||init.kev||init.new_;
+      if(hasInit){{fillForm(init);runSearch();}}
+    }})
+    .catch(e=>document.getElementById("sf-count").textContent="Failed to load data.");
+}})();
+</script>
+</body>
+</html>"""
+    with open("search.html", "w", encoding="utf-8") as fh:
+        fh.write(html)
+    log("  Written: search.html")
+
+
 def _build_heatmap_html():
     SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
     SEV_COLOR = {"CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#d97706", "LOW": "#16a34a", "UNKNOWN": "#94a3b8"}
@@ -4196,6 +4484,7 @@ def main():
     cve_pages = write_cve_pages(vulns, date_str)
     log("Writing stats page...")
     write_stats_page(vulns, date_str)
+    write_search_page(vulns)
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
     log("Writing CWE pages...")

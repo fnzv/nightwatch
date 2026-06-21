@@ -2044,6 +2044,7 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
     entries.append(url_entry(f"{base_url}/zero-days.html", "hourly", "0.9"))
     entries.append(url_entry(f"{base_url}/new-this-week.html", "daily", "0.8"))
     entries.append(url_entry(f"{base_url}/grafana.html", "monthly", "0.6"))
+    entries.append(url_entry(f"{base_url}/agents.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
     entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
@@ -2358,6 +2359,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <a class="hlink" href="/archive/">Archive</a>
       <a class="hlink" href="/how-to-scan.html">&#128737;&nbsp;How to scan</a>
       <a class="hlink" href="/grafana.html">&#128202;&nbsp;Grafana</a>
+      <a class="hlink" href="/agents.html">&#129302;&nbsp;Agents</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/api.html">API</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
@@ -5896,6 +5898,434 @@ def _badge_svg(label, value, color):
 </svg>'''
 
 
+def write_llms_txt(vulns, date_str, base_url=BASE_URL):
+    n_total  = len(vulns)
+    n_crit   = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
+    n_kev    = sum(1 for v in vulns if v.get("badge") == "ACTIVELY EXPLOITED")
+    n_poc    = sum(1 for v in vulns if v.get("poc"))
+
+    content = f"""\
+# vulnfeed
+
+> vulnfeed is a real-time security vulnerability aggregator updated every 4 hours. \
+It tracks CVEs from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, \
+OSS-Security, GitHub Advisories, and OpenStack. \
+Current snapshot ({date_str}): {n_total} vulnerabilities tracked, \
+{n_crit} critical, {n_kev} actively exploited (CISA KEV), {n_poc} with public proof-of-concept exploit.
+
+Use this site when you need: current CVE severity and CVSS scores, exploitation status, \
+EPSS exploitation probability, affected product lists, patch/remediation links, \
+and curated must-patch lists for sysadmins and security engineers.
+
+## Key pages
+
+- [{base_url}/patch-now.html]({base_url}/patch-now.html): Curated must-patch list. Tier 1 = CISA KEV (actively exploited, patch immediately). Tier 2 = public PoC exploit available (patch soon). Updated every 4h. Use this to answer "what should I patch right now?"
+- [{base_url}/zero-days.html]({base_url}/zero-days.html): Zero-day and active exploit tracker. Two sections: confirmed in-the-wild exploitation (CISA KEV) and CVEs with public proof-of-concept code not yet KEV-listed.
+- [{base_url}/new-this-week.html]({base_url}/new-this-week.html): All CVEs published in the last 7 days, sorted by severity/EPSS. Stats: total new, critical, high, KEV, PoC counts.
+- [{base_url}/trending.html]({base_url}/trending.html): CVEs with rising exploitation probability — EPSS jumped ≥5 percentage points since yesterday, or EPSS ≥90th percentile.
+- [{base_url}/stats.html]({base_url}/stats.html): Aggregate statistics — severity distribution, top sources, top vendors, EPSS distribution.
+- [{base_url}/search.html]({base_url}/search.html): Advanced CVE search with filters for severity, source, EPSS range, date range. Supports CSV export.
+
+## JSON API
+
+The primary machine-readable endpoint is:
+
+    {base_url}/vulns.json
+
+Returns a JSON array. Updated every 4 hours. No authentication. CORS open. Typical size: 10,000–15,000 entries.
+
+### Key fields per entry
+
+- `id` (string): CVE ID (e.g. "CVE-2026-12345") or advisory ID
+- `title` (string): Short vulnerability description
+- `description` (string): Full description
+- `severity` (string): "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN"
+- `score` (number|null): CVSS v3 base score (0.0–10.0)
+- `epss` (number|null): EPSS probability of exploitation within 30 days (0–1)
+- `epss_pct` (number|null): EPSS percentile (0–100)
+- `badge` (string|null): "ACTIVELY EXPLOITED" if on CISA KEV catalog
+- `poc` (boolean|null): true if public proof-of-concept exploit exists
+- `published` (string): ISO 8601 publication date
+- `source` (string): Data source (NVD, Ubuntu, Debian, Red Hat, Kubernetes, etc.)
+- `affected` (array): Affected product strings
+- `references` (array): Advisory and patch URLs
+- `url` (string): Canonical source URL
+
+### Useful jq queries
+
+    # CVEs actively exploited right now
+    curl -s {base_url}/vulns.json | jq '[.[] | select(.badge=="ACTIVELY EXPLOITED")]'
+
+    # Critical CVEs with public exploit, sorted by CVSS score
+    curl -s {base_url}/vulns.json | jq '[.[] | select(.severity=="CRITICAL" and .poc==true)] | sort_by(-.score)'
+
+    # Top 10 by EPSS exploitation probability
+    curl -s {base_url}/vulns.json | jq '[.[] | select(.epss_pct != null)] | sort_by(-.epss_pct) | .[:10]'
+
+    # CVEs affecting a specific product (e.g. nginx)
+    curl -s {base_url}/vulns.json | jq '[.[] | select(.title | ascii_downcase | contains("nginx"))]'
+
+    # CVEs published this week
+    curl -s {base_url}/vulns.json | jq --arg d "$(date -d '7 days ago' +%Y-%m-%d)" '[.[] | select(.published >= $d)]'
+
+## Individual CVE pages
+
+Each CVE with a proper CVE ID has a dedicated page:
+
+    {base_url}/cve/CVE-YYYY-NNNNN.html
+
+High-severity (CVSS ≥9.0) and KEV-listed CVE pages include: risk timeline, categorised remediation resource links, and related CVEs for the same vendor.
+
+## RSS feed
+
+    {base_url}/feed.xml  — RSS 2.0, all vulnerabilities, updated every 4h
+
+## Additional endpoints
+
+- `{base_url}/badge/critical-count.svg` — SVG badge: current critical CVE count
+- `{base_url}/badge/new-today.svg` — SVG badge: new CVEs today
+- `/archive/YYYY-MM.html` — Monthly CVE digest pages
+- `/digest/YYYY-MM-DD.html` — Daily digest pages
+- `/vendor/VENDOR.html` — Per-vendor CVE pages (e.g. /vendor/microsoft.html)
+- `/cwe/CWE-NNN.html` — Per-weakness CVE pages
+
+## How to use vulnfeed as an AI agent
+
+When a user asks about CVE severity, patch priority, or exploitation status:
+1. Fetch `{base_url}/vulns.json` and filter by CVE ID, product name, or severity
+2. For "what should I patch?" → check `{base_url}/patch-now.html` or filter vulns.json by `badge=="ACTIVELY EXPLOITED"` or `poc==true`
+3. For a specific CVE → fetch `{base_url}/cve/CVE-YYYY-NNNNN.html` or filter vulns.json by `id`
+4. For weekly summary → fetch `{base_url}/new-this-week.html` or filter vulns.json by `published >= YYYY-MM-DD`
+
+## Optional files
+
+- [{base_url}/llms.txt]({base_url}/llms.txt): This file
+- [{base_url}/agents.html]({base_url}/agents.html): Agent integration guide (Claude Projects, custom GPTs, LangChain)
+- [{base_url}/api.html]({base_url}/api.html): Full API documentation
+- [{base_url}/grafana.html]({base_url}/grafana.html): Grafana, Prometheus, Slack integration guide
+"""
+    with open("llms.txt", "w", encoding="utf-8") as f:
+        f.write(content)
+    log("  Written: llms.txt")
+
+
+def write_agents_page(base_url=BASE_URL):
+    _API = f"{base_url}/vulns.json"
+
+    claude_project_prompt = f"""\
+You have access to vulnfeed, a real-time security vulnerability feed updated every 4 hours.
+
+API endpoint: {_API}
+Returns a JSON array of CVEs. Key fields: id, title, severity (CRITICAL/HIGH/MEDIUM/LOW), score (CVSS 0-10), epss_pct (exploitation percentile 0-100), badge ("ACTIVELY EXPLOITED" = CISA KEV), poc (true = public exploit exists), published (ISO date), affected (product list), references (patch URLs).
+
+When the user asks about vulnerabilities, patch priorities, or CVE details:
+- Fetch {_API} to get current data
+- For "what should I patch?" filter where badge=="ACTIVELY EXPLOITED" or poc==true, sort by severity/score
+- For a specific CVE, filter by id field
+- For a product, filter title or affected fields by product name
+- For weekly summary, filter published >= 7 days ago
+- EPSS percentile >90 = high exploitation probability, treat as urgent
+
+Key pages (human-readable):
+- Patch now (KEV + PoC): {base_url}/patch-now.html
+- Zero-days & active exploits: {base_url}/zero-days.html
+- New this week: {base_url}/new-this-week.html
+- Trending (rising EPSS): {base_url}/trending.html
+- CVE detail: {base_url}/cve/CVE-YYYY-NNNNN.html\
+"""
+
+    custom_gpt_prompt = f"""\
+You are a security vulnerability assistant with access to vulnfeed ({base_url}), a real-time CVE aggregator updated every 4 hours.
+
+Data source: {_API} — JSON array of current vulnerabilities.
+
+When asked about CVEs or patch priorities:
+1. Fetch the JSON API and filter/sort as needed
+2. For urgent patches: filter badge=="ACTIVELY EXPLOITED" (CISA KEV) or poc==true
+3. For a CVE: match on the id field
+4. Always mention CVSS score, EPSS percentile, and whether it's KEV-listed
+5. Link to {base_url}/cve/[CVE-ID].html for full details\
+"""
+
+    langchain_tool = f"""\
+from langchain.tools import tool
+import json, urllib.request
+
+@tool
+def query_vulnfeed(query: str) -> str:
+    \"\"\"
+    Search vulnfeed for current CVE vulnerability data.
+    Query can be: a CVE ID, a product name, a severity level (CRITICAL/HIGH),
+    or keywords like 'actively exploited', 'patch now', 'new this week'.
+    Returns matching vulnerabilities with severity, CVSS score, and EPSS percentile.
+    \"\"\"
+    with urllib.request.urlopen("{_API}") as r:
+        vulns = json.load(r)
+
+    q = query.lower().strip()
+
+    # KEV / patch now
+    if any(x in q for x in ["patch now", "exploited", "kev", "urgent"]):
+        results = [v for v in vulns if v.get("badge") == "ACTIVELY EXPLOITED"]
+
+    # PoC / zero-day
+    elif any(x in q for x in ["poc", "zero-day", "exploit code", "public exploit"]):
+        results = [v for v in vulns if v.get("poc")]
+
+    # Specific CVE ID
+    elif q.startswith("cve-"):
+        results = [v for v in vulns if v["id"].lower() == q]
+
+    # New this week
+    elif "this week" in q or "new" in q:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        results = [v for v in vulns if (v.get("published") or "")[:10] >= cutoff]
+
+    # Severity filter
+    elif q in ("critical", "high", "medium", "low"):
+        results = [v for v in vulns if v.get("severity", "").lower() == q]
+
+    # Product / keyword search
+    else:
+        results = [
+            v for v in vulns
+            if q in (v.get("title") or "").lower()
+            or any(q in a.lower() for a in (v.get("affected") or []))
+        ]
+
+    results.sort(key=lambda v: (
+        {{"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3}}.get(v.get("severity","UNKNOWN"),4),
+        -(v.get("score") or 0)
+    ))
+
+    if not results:
+        return f"No vulnerabilities found for: {{query}}"
+
+    lines = [f"Found {{len(results)}} vulnerabilities for '{{query}}':\\n"]
+    for v in results[:10]:
+        kev  = " [KEV-EXPLOITED]" if v.get("badge") == "ACTIVELY EXPLOITED" else ""
+        poc  = " [PoC]" if v.get("poc") else ""
+        epss = f" EPSS:{{v['epss_pct']:.0f}}%ile" if v.get("epss_pct") else ""
+        sc   = f" CVSS:{{v['score']:.1f}}" if v.get("score") is not None else ""
+        lines.append(
+            f"• {{v['id']}} [{{v.get('severity','?')}}{{sc}}{{epss}}]{{kev}}{{poc}}\\n"
+            f"  {{(v.get('title') or '')[:100]}}\\n"
+            f"  Details: {base_url}/cve/{{v['id']}}.html"
+        )
+    if len(results) > 10:
+        lines.append(f"\\n... and {{len(results)-10}} more. Full data: {_API}")
+    return "\\n".join(lines)\
+"""
+
+    mcp_config = f"""\
+{{
+  "mcpServers": {{
+    "vulnfeed": {{
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {{}}
+    }}
+  }}
+}}
+
+// Then in your Claude Desktop system prompt, add:
+// "When asked about CVEs or vulnerabilities, fetch {_API} and filter the results."
+// Or point directly at a specific page:
+// - Patch now: {base_url}/patch-now.html
+// - Zero-days: {base_url}/zero-days.html\
+"""
+
+    n8n_example = f"""\
+// n8n HTTP Request node → Code node workflow
+// Node 1: HTTP Request
+//   Method: GET
+//   URL: {_API}
+//   Response Format: JSON
+
+// Node 2: Code (JavaScript)
+const vulns = $input.first().json;
+
+const urgent = vulns
+  .filter(v => v.badge === "ACTIVELY EXPLOITED" || (v.poc && v.score >= 8))
+  .sort((a,b) => (b.score||0) - (a.score||0))
+  .slice(0, 10);
+
+return urgent.map(v => ({{
+  json: {{
+    id: v.id,
+    title: v.title?.slice(0,100),
+    severity: v.severity,
+    score: v.score,
+    epss_pct: v.epss_pct,
+    kev: v.badge === "ACTIVELY EXPLOITED",
+    poc: !!v.poc,
+    url: `{base_url}/cve/${{v.id}}.html`
+  }}
+}}));\
+"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>AI Agent Integration — vulnfeed CVE API for Claude, GPT, LangChain | vulnfeed</title>
+<meta name="description" content="Use vulnfeed's CVE JSON API with AI agents: Claude Projects, custom GPTs, LangChain tools, n8n workflows. Copy-paste prompts and code for security-aware AI assistants.">
+<link rel="canonical" href="{base_url}/agents.html">
+<style>
+{_PAGE_CSS}
+pre{{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:1.1rem 1.25rem;font-size:.75rem;line-height:1.65;overflow-x:auto;margin:.75rem 0;border:1px solid #1e293b;font-family:ui-monospace,"Cascadia Code","Fira Code",monospace}}
+.copy-btn{{float:right;background:#334155;color:#94a3b8;border:none;border-radius:4px;padding:.2rem .6rem;font-size:.68rem;cursor:pointer;font-family:inherit;margin-top:-.15rem}}
+.copy-btn:hover{{background:#475569;color:#f1f5f9}}.copy-btn.copied{{background:#16a34a;color:#fff}}
+.section{{margin:2.5rem 0 0}}
+.card{{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:1.25rem 1.5rem;margin:.75rem 0}}
+.card h3{{font-size:.88rem;font-weight:700;margin-bottom:.4rem;display:flex;align-items:center;gap:.5rem}}
+.card p{{font-size:.8rem;color:#64748b;margin-bottom:.75rem;line-height:1.6}}
+.tag{{display:inline-block;background:#334155;color:#94a3b8;border-radius:4px;padding:.1rem .4rem;font-size:.63rem;font-weight:600}}
+.tag-claude{{background:#d97706;color:#fff}}.tag-gpt{{background:#16a34a;color:#fff}}
+.tag-py{{background:#1e3a8a;color:#93c5fd}}.tag-n8n{{background:#7c3aed;color:#e9d5ff}}
+.endpoint-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.55rem;margin:.75rem 0 1.25rem}}
+.ep{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:.7rem .9rem}}
+.ep code{{font-family:ui-monospace,monospace;font-size:.73rem;color:#2563eb;font-weight:700;display:block;margin-bottom:.25rem;word-break:break-all}}
+.ep .ep-desc{{font-size:.72rem;color:#64748b;line-height:1.5}}
+.ep .ep-badge{{display:inline-block;font-size:.6rem;font-weight:700;padding:.05rem .3rem;border-radius:3px;margin-top:.25rem;color:#fff}}
+.toc{{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:2rem}}
+.toc a{{font-size:.75rem;color:#2563eb;background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:.2rem .55rem;text-decoration:none;font-weight:500}}
+.toc a:hover{{background:#dbeafe}}
+</style>
+</head>
+<body>
+<header style="background:#0f172a;color:#f1f5f9;padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem">
+  <div><div style="font-size:1.25rem;font-weight:700;letter-spacing:-.02em">vuln<em style="color:#60a5fa;font-style:normal">feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <a class="hlink" href="/api.html">API docs</a>
+    <a class="hlink" href="/grafana.html">Grafana</a>
+    <a class="hlink" href="/llms.txt">llms.txt</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1>&#129302; AI Agent Integration</h1>
+  <p class="sub">vulnfeed is agent-ready. Use the open JSON API to give your AI assistant real-time CVE awareness — Claude Projects, custom GPTs, LangChain, n8n and more.</p>
+
+  <div class="toc">
+    <a href="#endpoints">Endpoints</a>
+    <a href="#claude">Claude Projects</a>
+    <a href="#gpt">Custom GPT</a>
+    <a href="#langchain">LangChain tool</a>
+    <a href="#n8n">n8n workflow</a>
+    <a href="#mcp">MCP</a>
+    <a href="#llmstxt">llms.txt</a>
+  </div>
+
+  <!-- Endpoints -->
+  <div class="section" id="endpoints">
+    <h2>&#128196; Endpoints at a glance</h2>
+    <div class="endpoint-grid">
+      <div class="ep"><code>{_API}</code><div class="ep-desc">Full CVE feed — JSON array, ~10k–15k entries, no auth, CORS open</div><span class="ep-badge" style="background:#2563eb">JSON</span> <span class="ep-badge" style="background:#16a34a">Updated 4h</span></div>
+      <div class="ep"><code>{base_url}/patch-now.html</code><div class="ep-desc">Must-patch list: CISA KEV (Tier 1) + public PoC (Tier 2)</div><span class="ep-badge" style="background:#7c3aed">KEV</span></div>
+      <div class="ep"><code>{base_url}/zero-days.html</code><div class="ep-desc">Active exploits + CVEs with public proof-of-concept code</div><span class="ep-badge" style="background:#dc2626">0-day</span></div>
+      <div class="ep"><code>{base_url}/new-this-week.html</code><div class="ep-desc">All CVEs published in the last 7 days</div></div>
+      <div class="ep"><code>{base_url}/trending.html</code><div class="ep-desc">CVEs with rising EPSS exploitation probability</div></div>
+      <div class="ep"><code>{base_url}/cve/CVE-YYYY-NNNNN.html</code><div class="ep-desc">Individual CVE page with timeline, remediation links, related CVEs</div></div>
+      <div class="ep"><code>{base_url}/feed.xml</code><div class="ep-desc">RSS 2.0 feed for readers and SIEM integrations</div></div>
+      <div class="ep"><code>{base_url}/llms.txt</code><div class="ep-desc">Machine-readable site description for AI agents</div></div>
+    </div>
+  </div>
+
+  <!-- Claude Projects -->
+  <div class="section" id="claude">
+    <h2>&#129302; Claude Projects</h2>
+    <div class="card">
+      <h3><span class="tag tag-claude">Claude</span> System prompt for a security assistant project</h3>
+      <p>In <strong>Claude.ai → Projects → Project instructions</strong>, paste this. Claude will fetch vulnfeed data when you ask about CVEs or patch priorities.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{claude_project_prompt}</pre>
+    </div>
+  </div>
+
+  <!-- Custom GPT -->
+  <div class="section" id="gpt">
+    <h2>&#129302; Custom GPT (OpenAI)</h2>
+    <div class="card">
+      <h3><span class="tag tag-gpt">GPT</span> Custom GPT instructions</h3>
+      <p>In <strong>OpenAI → Create a GPT → Instructions</strong>, paste this. Add <code>{_API}</code> as an Action (GET, no auth) so the GPT can fetch live data.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{custom_gpt_prompt}</pre>
+    </div>
+  </div>
+
+  <!-- LangChain -->
+  <div class="section" id="langchain">
+    <h2>&#128013; LangChain / LlamaIndex tool</h2>
+    <div class="card">
+      <h3><span class="tag tag-py">Python</span> Drop-in LangChain @tool — stdlib only, no extra deps</h3>
+      <p>Add to any LangChain agent. Handles CVE ID lookups, product searches, severity filters, "patch now", "this week", and PoC queries automatically.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{langchain_tool}</pre>
+    </div>
+  </div>
+
+  <!-- n8n -->
+  <div class="section" id="n8n">
+    <h2>&#9889; n8n / Make / Zapier</h2>
+    <div class="card">
+      <h3><span class="tag tag-n8n">n8n</span> HTTP Request → Code node: fetch urgent CVEs</h3>
+      <p>Use in an n8n workflow to pull urgent CVEs every 4 hours and feed them into Slack, PagerDuty, Jira, or any downstream node.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{n8n_example}</pre>
+    </div>
+  </div>
+
+  <!-- MCP -->
+  <div class="section" id="mcp">
+    <h2>&#128279; MCP (Model Context Protocol)</h2>
+    <div class="card">
+      <h3><span class="tag">MCP</span> Use mcp-server-fetch to give Claude Desktop live CVE access</h3>
+      <p>Add <code>mcp-server-fetch</code> to your Claude Desktop config. Claude can then fetch <code>{_API}</code> directly during a conversation — no custom server needed.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{mcp_config}</pre>
+    </div>
+  </div>
+
+  <!-- llms.txt -->
+  <div class="section" id="llmstxt">
+    <h2>&#128196; llms.txt</h2>
+    <div class="card">
+      <h3><span class="tag">Standard</span> Machine-readable site description</h3>
+      <p>vulnfeed publishes <a href="/llms.txt" style="color:#2563eb"><strong>/llms.txt</strong></a> — a plain-text file following the <a href="https://llmstxt.org" style="color:#2563eb">llmstxt.org</a> convention that tells AI agents what this site offers, what endpoints exist, and how to query them. Point your agent or RAG pipeline at it for automatic context.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy URL</button>
+      <pre>{base_url}/llms.txt</pre>
+    </div>
+  </div>
+
+  <p style="margin-top:2.5rem;font-size:.75rem;color:#64748b">All endpoints are open, no API key required. Data updated every 4 hours via GitHub Actions. <a href="/api.html" style="color:#2563eb">Full API documentation</a> · <a href="/grafana.html" style="color:#2563eb">Grafana &amp; Prometheus integration</a></p>
+</div>
+<script>
+function copyCode(btn) {{
+  const pre = btn.nextElementSibling;
+  navigator.clipboard.writeText(pre.textContent).then(() => {{
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1800);
+  }});
+}}
+</script>
+</body>
+</html>"""
+
+    with open("agents.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log("  Written: agents.html")
+
+
 def write_monthly_archive_pages(hist_dates, date_str, base_url=BASE_URL):
     """Generate /archive/YYYY-MM.html per month + /archive/index.html."""
     os.makedirs("archive", exist_ok=True)
@@ -6445,6 +6875,8 @@ def main():
     write_how_to_scan_page()
     write_api_docs_page()
     write_grafana_page()
+    write_agents_page()
+    write_llms_txt(vulns, date_str)
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
     log("Writing CWE pages...")

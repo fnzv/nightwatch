@@ -1586,6 +1586,9 @@ _CVE_PAGE_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -1649,12 +1652,16 @@ ul.aff-list li{font-family:ui-monospace,monospace;font-size:.82rem;background:#f
 .explainer strong{color:#0369a1}
 .explainer .expl-kev{color:#6d28d9;font-weight:700}
 .explainer .expl-poc{color:#dc2626;font-weight:700}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 </style>
 </head>
 <body>
 <nav>
   <a href="__BASE_URL__/" class="nav-logo">vuln<em>feed</em></a>
   <a href="__BASE_URL__/" class="nav-back">&#8592; all vulnerabilities</a>
+  <button id="dm-toggle" onclick="(function(){var n=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=n;localStorage.setItem('theme',n);this.textContent=n==='dark'?'☀️':'🌙'}).call(this)" style="margin-left:auto;background:none;border:1px solid #334155;color:#94a3b8;border-radius:5px;padding:.18rem .45rem;font-size:.85rem;cursor:pointer;line-height:1" title="Toggle dark/light mode">🌙</button>
 </nav>
 <main>
   <div class="badges">__CVE_BADGES__</div>
@@ -1674,7 +1681,26 @@ __CVE_REFS_HTML__
     <a href="__BASE_URL__/">vulnfeed</a> aggregates __TOTAL_COUNT__ vulnerabilities from NVD, CISA KEV,
     Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack &mdash; updated every 4 hours.
   </div>
+  <div style="margin-top:2rem">
+    <h2>Discussion</h2>
+    <script src="https://giscus.app/client.js"
+      data-repo="fnzv/nightwatch"
+      data-repo-id="R_kgDOS6ts2g"
+      data-category="CVE Discussions"
+      data-category-id=""
+      data-mapping="pathname"
+      data-strict="0"
+      data-reactions-enabled="1"
+      data-emit-metadata="0"
+      data-input-position="top"
+      data-theme="preferred_color_scheme"
+      data-lang="en"
+      crossorigin="anonymous"
+      async>
+    </script>
+  </div>
 </main>
+<script>if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js")</script>
 </body>
 </html>
 """
@@ -1866,9 +1892,11 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
         )
 
     entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
+    entries.append(url_entry(f"{base_url}/trending.html", "hourly", "0.8"))
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
     entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
+    entries.append(url_entry(f"{base_url}/api.html", "monthly", "0.5"))
     entries.append(url_entry(f"{base_url}/digest/", "daily", "0.6"))
     for vp in (vendor_pages or []):
         entries.append(url_entry(f"{base_url}/vendor/{vp['slug']}.html", "daily", "0.7"))
@@ -1915,6 +1943,9 @@ _HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -2148,6 +2179,9 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #sub-modal-thanks{font-size:.88rem;color:#4ade80;text-align:center;padding:.5rem 0;display:none}
 #sub-open-btn{padding:.22rem .7rem;border-radius:5px;background:transparent;color:#94a3b8;border:1px solid #334155;font-size:.75rem;cursor:pointer;white-space:nowrap}
 #sub-open-btn:hover{border-color:#60a5fa;color:#f1f5f9}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 </style>
 </head>
 <body>
@@ -2162,11 +2196,14 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub &middot; OSV</div>
     <div style="margin-top:.5rem;display:flex;gap:.4rem;align-items:center;justify-content:flex-end;flex-wrap:wrap">
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
+      <a class="hlink" href="/trending.html">&#128200;&nbsp;Trending</a>
       <a class="hlink" href="/stats.html">Stats</a>
       <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
       <a class="hlink" href="/how-to-scan.html">&#128737;&nbsp;How to scan</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
+      <a class="hlink" href="/api.html">API</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
+      <button id="dm-toggle" onclick="(function(){var n=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=n;localStorage.setItem('theme',n);this.textContent=n==='dark'?'☀️':'🌙'}).call(this)" style="background:none;border:1px solid #334155;color:#94a3b8;border-radius:5px;padding:.18rem .45rem;font-size:.85rem;cursor:pointer;line-height:1" title="Toggle dark/light mode">🌙</button>
     </div>
     <div style="margin-top:.45rem;text-align:right">
       <button id="sub-open-btn">&#128231; Weekly digest</button>
@@ -2414,11 +2451,13 @@ function card(v){
 }
 
 function newsItem(n){
-  const src=`<span class="b bsrc" style="flex-shrink:0">${esc(n.source)}</span>`;
-  const sc=n.score!=null?`${n.score}pts`:""
-  const cmt=n.comments_url?`<a href="${esc(n.comments_url)}" target="_blank" rel="noopener">${n.comments} comments</a>`:"";
-  const dt=n._ts?timeAgo(n._ts):"";
-  const meta=[sc,cmt,dt].filter(Boolean).join(" · ");
+  const srcColors={"Hacker News":"#ff6600","Bleeping Computer":"#1a73e8","The Hacker News":"#e53935","Krebs on Security":"#2e7d32","Security Week":"#6a1b9a"};
+  const col=srcColors[n.source]||"#334155";
+  const src=`<span class="b bsrc" style="flex-shrink:0;background:${col}">${esc(n.source)}</span>`;
+  const sc=n.score!=null?`<strong style="color:#ff6600">▲ ${n.score}</strong>`:"";
+  const cmt=n.comments_url?`<a href="${esc(n.comments_url)}" target="_blank" rel="noopener">${n.comments} 💬</a>`:"";
+  const dt=n._ts?`<span style="color:var(--muted)">${timeAgo(n._ts)}</span>`:"";
+  const meta=[sc,cmt,dt].filter(Boolean).join(" &middot; ");
   const desc=n.description?`<div class="news-desc">${esc(n.description)}</div>`:"";
   return `<div class="news-item"><div class="news-row">${src}<a class="news-title" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="news-meta">${meta}</div></div>${desc}</div>`;
 }
@@ -2853,6 +2892,7 @@ try{(function(){
 })()}catch(_){}
 </script>
 __STATIC_CVE_HTML__
+<script>if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js")</script>
 </body>
 </html>
 """
@@ -3265,6 +3305,9 @@ _STATS_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -3272,6 +3315,9 @@ _STATS_HTML = """\
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
 header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
@@ -3377,6 +3423,9 @@ def write_search_page(vulns, base_url=BASE_URL):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -3386,6 +3435,9 @@ def write_search_page(vulns, base_url=BASE_URL):
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 :root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}}}
+[data-theme="dark"]{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="light"]{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}}
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;font-size:14px}}
 header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}}
 .logo{{font-size:1.2rem;font-weight:800;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
@@ -3671,6 +3723,9 @@ def write_how_to_scan_page(base_url=BASE_URL):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -3680,6 +3735,9 @@ def write_how_to_scan_page(base_url=BASE_URL):
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 :root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}}}
+[data-theme="dark"]{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="light"]{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}}
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}}
 header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}}
 .logo{{font-size:1.2rem;font-weight:800;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
@@ -4106,6 +4164,9 @@ _VENDOR_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -4115,6 +4176,9 @@ _VENDOR_HTML = """\
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
 header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
@@ -4283,6 +4347,9 @@ _CWE_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -4292,6 +4359,9 @@ _CWE_HTML = """\
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
 header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
@@ -4410,6 +4480,9 @@ _WEEKLY_DIGEST_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -4420,6 +4493,9 @@ _WEEKLY_DIGEST_HTML = """\
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
 header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
@@ -4625,6 +4701,9 @@ _DIGEST_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -4634,6 +4713,9 @@ _DIGEST_HTML = """\
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
 header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
@@ -4699,6 +4781,9 @@ _DIGEST_INDEX_HTML = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}()</script>
 <script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
@@ -4707,6 +4792,9 @@ _DIGEST_INDEX_HTML = """\
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="dark"]{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}
+[data-theme="light"]{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
 header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between}
 .logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
@@ -4849,6 +4937,293 @@ def write_digest_index(daily_dates, weekly_weeks, base_url=BASE_URL):
     )
     with open(os.path.join("digest", "index.html"), "w", encoding="utf-8") as f:
         f.write(idx_html)
+
+
+# ---------------------------------------------------------------------------
+# Trending page
+# ---------------------------------------------------------------------------
+
+def write_trending_page(vulns, date_str, base_url=BASE_URL):
+    trending = [
+        v for v in vulns
+        if v.get("_trending") or (v.get("epss_pct") or 0) >= 90
+    ]
+    trending.sort(key=lambda v: (-(v.get("epss_pct") or 0), -(v.get("score") or 0)))
+    count = len(trending)
+
+    rows = []
+    for v in trending:
+        sev = v.get("severity", "UNKNOWN")
+        sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+        epss_str = f'{v["epss_pct"]:.1f}%ile' if v.get("epss_pct") is not None else "—"
+        pub = _pub_ymd(v.get("published") or "")
+        ttl = _xe((v.get("title") or v["id"])[:120])
+        cve_id = _xe(v["id"])
+        # Link to CVE page if it looks like a CVE, else to source URL
+        if v["id"].startswith("CVE-"):
+            id_link = f'<a class="cve-id" href="{base_url}/cve/{cve_id}.html">{cve_id}</a>'
+        else:
+            id_link = f'<a class="cve-id" href="{_xe(v.get("url",""))}" target="_blank" rel="noopener">{cve_id}</a>'
+        trend_badge = '<span class="trend-badge">TRENDING</span>' if v.get("_trending") else ""
+        rows.append(
+            f'<tr>'
+            f'<td>{id_link} {trend_badge}</td>'
+            f'<td class="ttl">{ttl}</td>'
+            f'<td><span class="sev s{sev}">{sev}</span></td>'
+            f'<td>{sc_str}</td>'
+            f'<td>{epss_str}</td>'
+            f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+            f'<td>{pub}</td>'
+            f'</tr>'
+        )
+
+    table_html = (
+        '<table>'
+        '<tr><th>CVE / ID</th><th>Title</th><th>Severity</th><th>CVSS</th><th>EPSS</th><th>Source</th><th>Date</th></tr>'
+        + "".join(rows) +
+        '</table>'
+    ) if rows else '<div class="empty">No trending vulnerabilities right now.</div>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}}()</script>
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>Trending Vulnerabilities | vulnfeed</title>
+<meta name="description" content="CVEs with rising exploitation probability. Updated every 4 hours.">
+<link rel="canonical" href="{base_url}/trending.html">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}}}
+[data-theme="dark"]{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="light"]{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}}
+header{{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}}
+.logo{{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
+.hlink{{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}}
+.hlink:hover{{border-color:#60a5fa;background:rgba(96,165,250,.08)}}
+.wrap{{max-width:1100px;margin:0 auto;padding:2rem}}
+h1{{font-size:1.35rem;font-weight:800;margin-bottom:.25rem}}
+.sub{{font-size:.8rem;color:var(--muted);margin-bottom:1.75rem}}
+.count-badge{{display:inline-block;background:#f59e0b;color:#1e293b;border-radius:6px;padding:.2rem .7rem;font-size:.85rem;font-weight:700;margin-bottom:1rem}}
+table{{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}}
+th{{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:var(--bg)}}
+td{{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}}
+tr:last-child td{{border-bottom:none}}
+tr:hover td{{background:var(--bg)}}
+.cve-id{{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}}
+.cve-id:hover{{text-decoration:underline}}
+.sev{{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}}
+.sCRITICAL{{background:var(--crit)}}.sHIGH{{background:var(--high)}}.sMEDIUM{{background:var(--med)}}.sLOW{{background:var(--low)}}.sUNKNOWN{{background:var(--unk)}}
+.src-tag{{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}}
+.trend-badge{{display:inline-block;background:#f59e0b;color:#1e293b;border-radius:3px;padding:.04rem .3rem;font-size:.6rem;font-weight:700;text-transform:uppercase;vertical-align:middle;margin-left:.25rem}}
+.ttl{{font-size:.78rem;color:var(--text)}}
+.empty{{text-align:center;padding:4rem 2rem;color:var(--muted)}}
+@media(max-width:640px){{.wrap{{padding:1rem}}th:nth-child(4),td:nth-child(4),th:nth-child(6),td:nth-child(6){{display:none}}}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <a class="hlink" href="/stats.html">Stats</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1>&#128200; Trending Vulnerabilities</h1>
+  <p class="sub">CVEs whose exploitation probability jumped significantly in the last 24 hours, based on EPSS scores.</p>
+  <div class="count-badge">{count} CVEs trending right now</div>
+  {table_html}
+  <p style="margin-top:1.5rem;font-size:.75rem;color:var(--muted)">Updated {date_str}. EPSS = Exploit Prediction Scoring System (FIRST.org). TRENDING = EPSS jumped &ge;5 percentage points since yesterday.</p>
+</div>
+</body>
+</html>"""
+    with open("trending.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log(f"  Written: trending.html ({count} trending CVEs)")
+
+
+# ---------------------------------------------------------------------------
+# Badge SVGs
+# ---------------------------------------------------------------------------
+
+def _badge_svg(label, value, color):
+    lw = len(label) * 6 + 10
+    vw = len(str(value)) * 7 + 10
+    total = lw + vw
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20">
+  <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+  <rect rx="3" width="{total}" height="20" fill="#555"/>
+  <rect rx="3" x="{lw}" width="{vw}" height="20" fill="{color}"/>
+  <rect width="{total}" height="20" fill="url(#s)"/>
+  <g fill="#fff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11" text-rendering="geometricPrecision">
+    <text x="{lw//2}" y="15" fill="#010101" fill-opacity=".3" text-anchor="middle">{label}</text>
+    <text x="{lw//2}" y="14" text-anchor="middle">{label}</text>
+    <text x="{lw + vw//2}" y="15" fill="#010101" fill-opacity=".3" text-anchor="middle">{value}</text>
+    <text x="{lw + vw//2}" y="14" text-anchor="middle">{value}</text>
+  </g>
+</svg>'''
+
+
+def write_badges(vulns, date_str):
+    os.makedirs("badge", exist_ok=True)
+    crit = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
+    new_today = sum(1 for v in vulns if v.get("_new"))
+    with open("badge/critical-count.svg", "w") as f:
+        f.write(_badge_svg("critical CVEs", crit, "#dc2626"))
+    with open("badge/new-today.svg", "w") as f:
+        f.write(_badge_svg("new today", new_today, "#2563eb"))
+    log(f"  Written: badge/critical-count.svg ({crit} critical), badge/new-today.svg ({new_today} new)")
+
+
+# ---------------------------------------------------------------------------
+# API docs page
+# ---------------------------------------------------------------------------
+
+def write_api_docs_page(base_url=BASE_URL):
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>!function(){{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}}()</script>
+<title>API Documentation | vulnfeed</title>
+<meta name="description" content="vulnfeed public API — access 10,000+ CVEs as JSON. Free, no auth, updated every 4 hours.">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}}}
+[data-theme="dark"]{{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#60a5fa}}
+[data-theme="light"]{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}}
+a{{color:var(--accent)}}
+header{{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between}}
+.logo{{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
+.hlink{{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}}
+.wrap{{max-width:860px;margin:0 auto;padding:2rem 1.5rem 4rem}}
+h1{{font-size:1.5rem;font-weight:800;margin-bottom:.4rem}}
+h2{{font-size:1rem;font-weight:700;margin:2rem 0 .5rem;color:var(--text)}}
+h3{{font-size:.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:1.5rem 0 .4rem}}
+p{{margin-bottom:.75rem;font-size:.93rem;color:var(--text)}}
+.sub{{color:var(--muted);font-size:.9rem;margin-bottom:2rem}}
+pre{{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.82rem;font-family:ui-monospace,monospace;margin-bottom:1rem}}
+code{{font-family:ui-monospace,monospace;font-size:.85em;background:var(--card);border:1px solid var(--border);padding:.1rem .35rem;border-radius:3px}}
+table{{width:100%;border-collapse:collapse;font-size:.83rem;margin-bottom:1.5rem;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden}}
+th{{text-align:left;padding:.5rem .75rem;background:var(--bg);font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid var(--border)}}
+td{{padding:.45rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}}
+tr:last-child td{{border-bottom:none}}
+.badge{{display:inline-block;padding:.1rem .4rem;border-radius:3px;font-size:.7rem;font-weight:700;color:#fff;background:#16a34a}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">vuln<em>feed</em></div>
+  <a class="hlink" href="/">&#8592; Live feed</a>
+</header>
+<div class="wrap">
+  <h1>Public API</h1>
+  <p class="sub">Free, unauthenticated JSON API. No rate limits. Updated every 4 hours by GitHub Actions.</p>
+
+  <h2>Endpoints</h2>
+
+  <h3>All vulnerabilities</h3>
+  <pre>GET {base_url}/vulns.json</pre>
+  <p>Returns an array of all vulnerability objects tracked in the last 30 days (~10,000+ entries). No authentication required.</p>
+
+  <h3>Individual CVE page</h3>
+  <pre>GET {base_url}/cve/{{CVE-ID}}.html</pre>
+  <p>Human-readable page for a specific CVE with explainer text, severity, CVSS, EPSS, affected products, fix command, and references.</p>
+
+  <h3>RSS feed</h3>
+  <pre>GET {base_url}/feed.xml</pre>
+  <p>RSS 2.0 feed of the latest vulnerabilities. Subscribe in any feed reader.</p>
+
+  <h3>Vendor RSS feeds</h3>
+  <pre>GET {base_url}/vendor/{{vendor}}.xml</pre>
+  <p>Per-vendor RSS feeds. Available vendors: kubernetes, nginx, openssl, cisco, fortinet, vmware, ubuntu, debian, and more — see the <a href="/vendor/">vendor index</a>.</p>
+
+  <h3>Embeddable badges</h3>
+  <pre>GET {base_url}/badge/critical-count.svg
+GET {base_url}/badge/new-today.svg</pre>
+  <p>SVG badges for embedding in READMEs or dashboards. Updated every 4 hours.</p>
+  <p><img src="/badge/critical-count.svg" alt="critical CVE count" style="vertical-align:middle"> &nbsp; <img src="/badge/new-today.svg" alt="new today" style="vertical-align:middle"></p>
+
+  <h2>Data schema</h2>
+  <p>Each object in <code>vulns.json</code> has the following fields:</p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>id</code></td><td>string</td><td>CVE ID (e.g. <code>CVE-2024-1234</code>) or advisory ID (USN-xxx, DSA-xxx)</td></tr>
+    <tr><td><code>title</code></td><td>string</td><td>Short human-readable title</td></tr>
+    <tr><td><code>description</code></td><td>string</td><td>Full vulnerability description</td></tr>
+    <tr><td><code>severity</code></td><td>string</td><td>CRITICAL / HIGH / MEDIUM / LOW / UNKNOWN</td></tr>
+    <tr><td><code>score</code></td><td>number|null</td><td>CVSS v3 base score (0.0&ndash;10.0)</td></tr>
+    <tr><td><code>epss</code></td><td>number|null</td><td>EPSS exploitation probability (0&ndash;1)</td></tr>
+    <tr><td><code>epss_pct</code></td><td>number|null</td><td>EPSS percentile (0&ndash;100)</td></tr>
+    <tr><td><code>source</code></td><td>string</td><td>Data source: NVD, Ubuntu, Debian, Microsoft, Cisco, Fortinet, etc.</td></tr>
+    <tr><td><code>published</code></td><td>string</td><td>ISO 8601 publish date</td></tr>
+    <tr><td><code>url</code></td><td>string</td><td>Canonical advisory URL</td></tr>
+    <tr><td><code>badge</code></td><td>string</td><td>"ACTIVELY EXPLOITED" if in CISA KEV catalog, else empty</td></tr>
+    <tr><td><code>poc</code></td><td>bool</td><td>true if a public PoC exploit exists on GitHub</td></tr>
+    <tr><td><code>patch</code></td><td>bool|null</td><td>true = patch available, false = no fix, null = unknown</td></tr>
+    <tr><td><code>fix</code></td><td>string</td><td>Shell command to apply the fix (e.g. <code>apt-get install --only-upgrade nginx</code>)</td></tr>
+    <tr><td><code>affected</code></td><td>array</td><td>List of affected package/product strings</td></tr>
+    <tr><td><code>references</code></td><td>array</td><td>List of reference URLs</td></tr>
+    <tr><td><code>_new</code></td><td>bool</td><td>true if this entry is new since yesterday&apos;s snapshot</td></tr>
+    <tr><td><code>_trending</code></td><td>bool</td><td>true if EPSS score jumped &ge;5pp since yesterday</td></tr>
+  </table>
+
+  <h2>Usage examples</h2>
+
+  <h3>curl + jq</h3>
+  <pre># All critical CVEs
+curl -s {base_url}/vulns.json | jq '[.[] | select(.severity=="CRITICAL")]'
+
+# CVEs with public exploits
+curl -s {base_url}/vulns.json | jq '[.[] | select(.poc==true)] | sort_by(-.score)'
+
+# Top 10 by EPSS score
+curl -s {base_url}/vulns.json | jq '[.[] | select(.epss!=null)] | sort_by(-.epss) | .[:10]'
+
+# New CVEs since yesterday
+curl -s {base_url}/vulns.json | jq '[.[] | select(._new==true)]'
+
+# Actively exploited
+curl -s {base_url}/vulns.json | jq '[.[] | select(.badge=="ACTIVELY EXPLOITED")]'</pre>
+
+  <h3>Python</h3>
+  <pre>import urllib.request, json
+
+with urllib.request.urlopen("{base_url}/vulns.json") as r:
+    vulns = json.load(r)
+
+critical = [v for v in vulns if v.get("severity") == "CRITICAL"]
+exploited = [v for v in vulns if v.get("badge") == "ACTIVELY EXPLOITED"]
+print(f"{{len(critical)}} critical, {{len(exploited)}} actively exploited")</pre>
+
+  <h2>Embed a badge</h2>
+  <p>Copy into any GitHub README or Markdown document:</p>
+  <pre>[![critical CVEs]({base_url}/badge/critical-count.svg)]({base_url})
+[![new today]({base_url}/badge/new-today.svg)]({base_url})</pre>
+
+  <p style="margin-top:2rem;font-size:.8rem;color:var(--muted)">Data sourced from NVD, CISA KEV, Ubuntu Security Notices, Debian Security Announcements, Red Hat, Microsoft MSRC, Cisco, Fortinet, Juniper, Kubernetes, Exploit-DB, OSS-Security, GitHub Advisory Database, and OSV. Updated every 4 hours.</p>
+</div>
+</body>
+</html>"""
+    with open("api.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log("  Written: api.html")
 
 
 # ---------------------------------------------------------------------------
@@ -5051,6 +5426,7 @@ def main():
     log("Writing API outputs...")
     write_json_api(vulns)
     write_rss(vulns)
+    write_badges(vulns, date_str)
     write_robots()
 
     # --- CVE pages + stats + vendor pages + sitemap ---
@@ -5058,8 +5434,10 @@ def main():
     cve_pages = write_cve_pages(vulns, date_str)
     log("Writing stats page...")
     write_stats_page(vulns, date_str)
+    write_trending_page(vulns, date_str)
     write_search_page(vulns)
     write_how_to_scan_page()
+    write_api_docs_page()
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
     log("Writing CWE pages...")

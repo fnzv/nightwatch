@@ -247,9 +247,7 @@ header{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;
       const val=v[c]??"";;
       return typeof val==="string"?`"${val.replace(/"/g,'""')}"`:(typeof val==="boolean"?val?"yes":"":""+val);
     }).join(","));
-    const blob=new Blob([header+"
-"+rows.join("
-")],{type:"text/csv"});
+    const blob=new Blob([header+"\n"+rows.join("\n")],{type:"text/csv"});
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
     a.download="vulnfeed-search.csv";

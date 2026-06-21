@@ -2196,7 +2196,7 @@ function timeAgo(ts){
 const DAY=864e5,now=Date.now();
 
 // Today badge (always live data)
-(function(){
+function updateTodayBadge(){
   const tc=D_TODAY.filter(v=>v._ts&&(now-v._ts)<DAY).length;
   const yc=D_TODAY.filter(v=>v._ts&&(now-v._ts)>=DAY&&(now-v._ts)<2*DAY).length;
   document.getElementById("todayN").textContent=tc;
@@ -2205,7 +2205,8 @@ const DAY=864e5,now=Date.now();
     const col=pct>0?"#4ade80":pct<0?"#f87171":"#94a3b8";
     document.getElementById("todayDelta").innerHTML=`<span style="color:${col}">${sign}${pct}% vs yesterday</span>`;
   }
-})();
+}
+updateTodayBadge();
 
 function updateSevBrk(){
   const cnt={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0};
@@ -2689,6 +2690,8 @@ document.getElementById("shareBtn").addEventListener("click",function(){
     const _np=document.getElementById("newPill");
     if(_np&&_nNew>0)_np.textContent="New ("+_nNew+")";
     if(loadEl)loadEl.style.display="none";
+    updateTodayBadge();
+    updateSevBrk();
     applyHash();
     applyFilters();
   }).catch(function(e){
@@ -3515,7 +3518,7 @@ header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex
       const val=v[c]??"";;
       return typeof val==="string"?`"${{val.replace(/"/g,'""')}}"`:(typeof val==="boolean"?val?"yes":"":""+val);
     }}).join(","));
-    const blob=new Blob([header+"\n"+rows.join("\n")],{{type:"text/csv"}});
+    const blob=new Blob([header+"\\n"+rows.join("\\n")],{{type:"text/csv"}});
     const a=document.createElement("a");
     a.href=URL.createObjectURL(blob);
     a.download="vulnfeed-search.csv";

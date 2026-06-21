@@ -2045,6 +2045,7 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
     entries.append(url_entry(f"{base_url}/new-this-week.html", "daily", "0.8"))
     entries.append(url_entry(f"{base_url}/grafana.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/agents.html", "monthly", "0.6"))
+    entries.append(url_entry(f"{base_url}/n8n.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
     entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
@@ -2359,6 +2360,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <a class="hlink" href="/archive/">Archive</a>
       <a class="hlink" href="/how-to-scan.html">&#128737;&nbsp;How to scan</a>
       <a class="hlink" href="/grafana.html">&#128202;&nbsp;Grafana</a>
+      <a class="hlink" href="/n8n.html">&#9889;&nbsp;n8n</a>
       <a class="hlink" href="/agents.html">&#129302;&nbsp;Agents</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/api.html">API</a>
@@ -6326,6 +6328,637 @@ function copyCode(btn) {{
     log("  Written: agents.html")
 
 
+def write_n8n_guide_page(base_url=BASE_URL):
+    _API = f"{base_url}/vulns.json"
+
+    # ── Workflow 1: Slack KEV alert every 4h ─────────────────────────────────
+    wf1_code = r"""const vulns = $input.first().json;
+
+const kev = vulns
+  .filter(v => v.badge === 'ACTIVELY EXPLOITED')
+  .sort((a, b) => (b.score || 0) - (a.score || 0))
+  .slice(0, 8);
+
+if (kev.length === 0) return [];
+
+const lines = kev.map(v => {
+  const score = v.score != null ? ` CVSS ${v.score.toFixed(1)}` : '';
+  const epss  = v.epss_pct != null ? ` · EPSS ${v.epss_pct.toFixed(0)}%ile` : '';
+  const poc   = v.poc ? ' · :warning: PoC public' : '';
+  return `• *<https://vulnfeed.it/cve/${v.id}.html|${v.id}>* [${v.severity}${score}${epss}${poc}]\n  ${(v.title || '').slice(0, 110)}`;
+});
+
+return [{
+  json: {
+    count: kev.length,
+    text: `:rotating_light: *${kev.length} CVE${kev.length > 1 ? 's' : ''} actively exploited right now* — <https://vulnfeed.it/patch-now.html|full patch list>\n\n` + lines.join('\n\n')
+  }
+}];"""
+
+    wf1_json = """{
+  "name": "vulnfeed — KEV Slack Alert (every 4h)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 4 }] }
+      },
+      "id": "sch-001", "name": "Every 4 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2, "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "VULNFEED_API",
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "http-001", "name": "Fetch vulnfeed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [460, 300]
+    },
+    {
+      "parameters": { "jsCode": "FILTER_CODE" },
+      "id": "code-001", "name": "Filter KEV CVEs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "leftValue": "={{ $json.count }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }]
+        }
+      },
+      "id": "if-001", "name": "Has results?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2, "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SLACK_WEBHOOK }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [{ "name": "text", "value": "={{ $json.text }}" }]
+        },
+        "options": {}
+      },
+      "id": "http-002", "name": "Post to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [1120, 220]
+    }
+  ],
+  "connections": {
+    "Every 4 hours":  { "main": [[{ "node": "Fetch vulnfeed",  "type": "main", "index": 0 }]] },
+    "Fetch vulnfeed": { "main": [[{ "node": "Filter KEV CVEs", "type": "main", "index": 0 }]] },
+    "Filter KEV CVEs":{ "main": [[{ "node": "Has results?",    "type": "main", "index": 0 }]] },
+    "Has results?":   { "main": [[{ "node": "Post to Slack",   "type": "main", "index": 0 }], []] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "vulnfeed" }, { "name": "security" }]
+}""".replace("VULNFEED_API", _API).replace('"FILTER_CODE"', json.dumps(wf1_code))
+
+    # ── Workflow 2: Weekly email digest ───────────────────────────────────────
+    wf2_code = r"""const vulns = $input.first().json;
+const now   = new Date();
+const cutoff = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
+
+const fresh = vulns
+  .filter(v => (v.published || '').slice(0, 10) >= cutoff)
+  .sort((a, b) => {
+    const sev = {CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3};
+    return (sev[a.severity] ?? 4) - (sev[b.severity] ?? 4) || (b.score || 0) - (a.score || 0);
+  });
+
+const nCrit = fresh.filter(v => v.severity === 'CRITICAL').length;
+const nKev  = fresh.filter(v => v.badge === 'ACTIVELY EXPLOITED').length;
+const nPoc  = fresh.filter(v => v.poc).length;
+
+const rows = fresh.slice(0, 20).map(v => {
+  const score = v.score != null ? v.score.toFixed(1) : '—';
+  const epss  = v.epss_pct != null ? v.epss_pct.toFixed(0) + '%' : '—';
+  const flags = [v.badge === 'ACTIVELY EXPLOITED' ? 'KEV' : '', v.poc ? 'PoC' : ''].filter(Boolean).join(', ');
+  return `<tr style="border-bottom:1px solid #e2e8f0">
+    <td style="padding:.4rem .6rem;font-family:monospace;font-size:.8rem"><a href="https://vulnfeed.it/cve/${v.id}.html">${v.id}</a></td>
+    <td style="padding:.4rem .6rem;font-size:.78rem">${(v.title || '').slice(0, 90)}</td>
+    <td style="padding:.4rem .6rem;font-size:.75rem;font-weight:700;color:${v.severity==='CRITICAL'?'#dc2626':v.severity==='HIGH'?'#ea580c':'#64748b'}">${v.severity}</td>
+    <td style="padding:.4rem .6rem;font-size:.75rem">${score}</td>
+    <td style="padding:.4rem .6rem;font-size:.75rem">${epss}</td>
+    <td style="padding:.4rem .6rem;font-size:.75rem;color:#7c3aed;font-weight:600">${flags}</td>
+  </tr>`;
+}).join('');
+
+const html = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:800px;margin:0 auto;padding:2rem;color:#1e293b">
+<h1 style="font-size:1.3rem;font-weight:800;margin-bottom:.25rem">vulnfeed Weekly — ${now.toISOString().slice(0,10)}</h1>
+<p style="color:#64748b;font-size:.85rem;margin-bottom:1.5rem">${fresh.length} new CVEs this week &middot; ${nCrit} critical &middot; ${nKev} actively exploited &middot; ${nPoc} with public PoC</p>
+<table style="width:100%;border-collapse:collapse;font-size:.8rem;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+<tr style="background:#f8fafc">
+  <th style="padding:.45rem .6rem;text-align:left;font-size:.68rem;color:#64748b;text-transform:uppercase">CVE</th>
+  <th style="padding:.45rem .6rem;text-align:left;font-size:.68rem;color:#64748b;text-transform:uppercase">Title</th>
+  <th style="padding:.45rem .6rem;text-align:left;font-size:.68rem;color:#64748b;text-transform:uppercase">Sev</th>
+  <th style="padding:.45rem .6rem;text-align:left;font-size:.68rem;color:#64748b;text-transform:uppercase">CVSS</th>
+  <th style="padding:.45rem .6rem;text-align:left;font-size:.68rem;color:#64748b;text-transform:uppercase">EPSS</th>
+  <th style="padding:.45rem .6rem;text-align:left;font-size:.68rem;color:#64748b;text-transform:uppercase">Flags</th>
+</tr>
+${rows}
+</table>
+<p style="margin-top:1.5rem;font-size:.75rem;color:#94a3b8">
+  <a href="https://vulnfeed.it/new-this-week.html">View full list</a> &middot;
+  <a href="https://vulnfeed.it/patch-now.html">Patch now list</a> &middot;
+  <a href="https://vulnfeed.it">vulnfeed.it</a>
+</p>
+</body></html>`;
+
+return [{ json: { subject: \`vulnfeed Weekly: \${fresh.length} CVEs, \${nCrit} critical — \${now.toISOString().slice(0,10)}\`, html, count: fresh.length } }];"""
+
+    wf2_json = """{
+  "name": "vulnfeed — Weekly Email Digest (Monday 9am)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "weeks", "weeksInterval": 1, "triggerAtDay": [1], "triggerAtHour": 9, "triggerAtMinute": 0 }] }
+      },
+      "id": "sch-002", "name": "Monday 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2, "position": [240, 300]
+    },
+    {
+      "parameters": { "url": "VULNFEED_API", "options": {} },
+      "id": "http-003", "name": "Fetch vulnfeed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [460, 300]
+    },
+    {
+      "parameters": { "jsCode": "DIGEST_CODE" },
+      "id": "code-002", "name": "Build digest email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "security@yourcompany.com",
+        "toEmail": "team@yourcompany.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}"
+      },
+      "id": "mail-001", "name": "Send digest email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2, "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Monday 9am":       { "main": [[{ "node": "Fetch vulnfeed",     "type": "main", "index": 0 }]] },
+    "Fetch vulnfeed":   { "main": [[{ "node": "Build digest email", "type": "main", "index": 0 }]] },
+    "Build digest email": { "main": [[{ "node": "Send digest email","type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "vulnfeed" }, { "name": "security" }]
+}""".replace("VULNFEED_API", _API).replace('"DIGEST_CODE"', json.dumps(wf2_code))
+
+    # ── Workflow 3: Jira ticket for new critical+KEV CVEs ─────────────────────
+    wf3_code = r"""const vulns  = $input.first().json;
+const stored = JSON.parse($vars.SEEN_IDS || '[]');
+const seenSet = new Set(stored);
+
+const urgent = vulns.filter(v =>
+  v.severity === 'CRITICAL' &&
+  v.badge === 'ACTIVELY EXPLOITED' &&
+  !seenSet.has(v.id)
+);
+
+// Return one item per CVE so the Jira node loops over them
+return urgent.map(v => ({
+  json: {
+    id:    v.id,
+    title: v.title || v.id,
+    score: v.score,
+    epss:  v.epss_pct,
+    url:   `https://vulnfeed.it/cve/${v.id}.html`,
+    summary: `[${v.id}] ${(v.title || '').slice(0, 100)}`,
+    description: `*Severity:* ${v.severity} | *CVSS:* ${v.score ?? '—'} | *EPSS:* ${v.epss_pct != null ? v.epss_pct.toFixed(0) + '%ile' : '—'}\n\n` +
+      `*Status:* CISA KEV — actively exploited in the wild${v.poc ? ' · public PoC available' : ''}\n\n` +
+      `*Description:* ${(v.description || '').slice(0, 500)}\n\n` +
+      `*vulnfeed page:* ${`https://vulnfeed.it/cve/${v.id}.html`}\n` +
+      `*NVD:* ${v.url || ''}`
+  }
+}));"""
+
+    wf3_json = """{
+  "name": "vulnfeed — Jira Ticket for Critical KEV CVEs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 4 }] }
+      },
+      "id": "sch-003", "name": "Every 4 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2, "position": [240, 300]
+    },
+    {
+      "parameters": { "url": "VULNFEED_API", "options": {} },
+      "id": "http-004", "name": "Fetch vulnfeed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [460, 300]
+    },
+    {
+      "parameters": { "jsCode": "JIRA_CODE" },
+      "id": "code-003", "name": "Filter new critical KEV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [{ "leftValue": "={{ $input.all().length }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }]
+        }
+      },
+      "id": "if-002", "name": "New CVEs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2, "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "create",
+        "project": { "value": "SEC" },
+        "issuetype": { "value": "Task" },
+        "summary": "={{ $json.summary }}",
+        "additionalFields": {
+          "description": "={{ $json.description }}",
+          "priority": { "id": "1" },
+          "labels": ["cve", "security", "kev"]
+        }
+      },
+      "id": "jira-001", "name": "Create Jira issue",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1, "position": [1120, 220]
+    }
+  ],
+  "connections": {
+    "Every 4 hours":        { "main": [[{ "node": "Fetch vulnfeed",         "type": "main", "index": 0 }]] },
+    "Fetch vulnfeed":       { "main": [[{ "node": "Filter new critical KEV","type": "main", "index": 0 }]] },
+    "Filter new critical KEV": { "main": [[{ "node": "New CVEs?",           "type": "main", "index": 0 }]] },
+    "New CVEs?":            { "main": [[{ "node": "Create Jira issue",      "type": "main", "index": 0 }], []] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "vulnfeed" }, { "name": "security" }]
+}""".replace("VULNFEED_API", _API).replace('"JIRA_CODE"', json.dumps(wf3_code))
+
+    # ── Workflow 4: PagerDuty / generic webhook for CVSS 9+ ──────────────────
+    wf4_code = r"""const vulns = $input.first().json;
+
+const critical = vulns
+  .filter(v => (v.score || 0) >= 9.0 && (v.badge === 'ACTIVELY EXPLOITED' || v.poc))
+  .sort((a, b) => (b.score || 0) - (a.score || 0))
+  .slice(0, 5);
+
+return critical.map(v => ({
+  json: {
+    routing_key: $vars.PAGERDUTY_KEY,
+    event_action: 'trigger',
+    dedup_key: v.id,
+    payload: {
+      summary:   `[vulnfeed] ${v.id} — ${v.severity} CVSS ${v.score} ${v.badge === 'ACTIVELY EXPLOITED' ? '(ACTIVELY EXPLOITED)' : '(PoC public)'}`,
+      source:    'vulnfeed.it',
+      severity:  v.severity === 'CRITICAL' ? 'critical' : 'error',
+      component: (v.affected || [])[0] || 'unknown',
+      custom_details: {
+        cvss:      v.score,
+        epss_pct:  v.epss_pct,
+        kev:       v.badge === 'ACTIVELY EXPLOITED',
+        poc:       !!v.poc,
+        title:     (v.title || '').slice(0, 200),
+        details:   `https://vulnfeed.it/cve/${v.id}.html`
+      }
+    },
+    links: [{ href: `https://vulnfeed.it/cve/${v.id}.html`, text: 'vulnfeed CVE page' }]
+  }
+}));"""
+
+    wf4_json = """{
+  "name": "vulnfeed — PagerDuty alert for CVSS 9+ exploited",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 4 }] }
+      },
+      "id": "sch-004", "name": "Every 4 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2, "position": [240, 300]
+    },
+    {
+      "parameters": { "url": "VULNFEED_API", "options": {} },
+      "id": "http-005", "name": "Fetch vulnfeed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [460, 300]
+    },
+    {
+      "parameters": { "jsCode": "PD_CODE" },
+      "id": "code-004", "name": "Build PagerDuty payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2, "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [{ "leftValue": "={{ $input.all().length }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }]
+        }
+      },
+      "id": "if-003", "name": "Has alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2, "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://events.pagerduty.com/v2/enqueue",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "http-006", "name": "Send to PagerDuty",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [1120, 220]
+    }
+  ],
+  "connections": {
+    "Every 4 hours":           { "main": [[{ "node": "Fetch vulnfeed",            "type": "main", "index": 0 }]] },
+    "Fetch vulnfeed":          { "main": [[{ "node": "Build PagerDuty payloads",  "type": "main", "index": 0 }]] },
+    "Build PagerDuty payloads":{ "main": [[{ "node": "Has alerts?",               "type": "main", "index": 0 }]] },
+    "Has alerts?":             { "main": [[{ "node": "Send to PagerDuty",         "type": "main", "index": 0 }], []] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "vulnfeed" }, { "name": "security" }]
+}""".replace("VULNFEED_API", _API).replace('"PD_CODE"', json.dumps(wf4_code))
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>n8n Security Automation with vulnfeed CVE API — Slack, Jira, PagerDuty | vulnfeed</title>
+<meta name="description" content="Step-by-step n8n workflows for CVE security automation: Slack KEV alerts, weekly email digest, Jira ticket creation, PagerDuty paging. Import-ready workflow JSON for vulnfeed.">
+<link rel="canonical" href="{base_url}/n8n.html">
+<style>
+{_PAGE_CSS}
+pre{{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:1.1rem 1.25rem;font-size:.73rem;line-height:1.65;overflow-x:auto;margin:.75rem 0;border:1px solid #1e293b;font-family:ui-monospace,"Cascadia Code","Fira Code",monospace;position:relative}}
+.copy-btn{{position:absolute;top:.6rem;right:.6rem;background:#334155;color:#94a3b8;border:none;border-radius:4px;padding:.2rem .6rem;font-size:.68rem;cursor:pointer;font-family:inherit}}
+.copy-btn:hover{{background:#475569;color:#f1f5f9}}.copy-btn.copied{{background:#16a34a;color:#fff}}
+.section{{margin:2.5rem 0 0}}
+.wf-card{{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:1.5rem;margin:1rem 0;box-shadow:0 1px 3px rgba(0,0,0,.05)}}
+.wf-card h3{{font-size:1rem;font-weight:800;margin-bottom:.25rem;display:flex;align-items:center;gap:.6rem}}
+.wf-card .wf-desc{{font-size:.8rem;color:#64748b;margin-bottom:1rem;line-height:1.6}}
+.wf-meta{{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}}
+.chip{{display:inline-flex;align-items:center;gap:.3rem;font-size:.68rem;font-weight:600;padding:.2rem .55rem;border-radius:20px;border:1px solid}}
+.chip-trigger{{background:#eff6ff;color:#2563eb;border-color:#bfdbfe}}
+.chip-dest{{background:#f0fdf4;color:#16a34a;border-color:#bbf7d0}}
+.chip-cond{{background:#fefce8;color:#ca8a04;border-color:#fde68a}}
+.step-list{{list-style:none;counter-reset:step;display:grid;gap:.6rem;margin:.75rem 0 1rem}}
+.step-list li{{counter-increment:step;display:flex;gap:.7rem;align-items:flex-start;font-size:.8rem;line-height:1.6}}
+.step-list li::before{{content:counter(step);background:#0f172a;color:#f1f5f9;border-radius:50%;width:1.3rem;height:1.3rem;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:700;flex-shrink:0;margin-top:.15rem}}
+.wf-label{{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin:.9rem 0 .3rem}}
+.tag{{display:inline-block;background:#334155;color:#94a3b8;border-radius:4px;padding:.1rem .4rem;font-size:.63rem;font-weight:600;margin-right:.25rem}}
+.tag-slack{{background:#4a154b;color:#fff}}.tag-email{{background:#1e3a8a;color:#93c5fd}}
+.tag-jira{{background:#0052cc;color:#fff}}.tag-pd{{background:#06ac38;color:#fff}}
+.toc{{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:2rem}}
+.toc a{{font-size:.75rem;color:#2563eb;background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:.2rem .55rem;text-decoration:none;font-weight:500}}
+.toc a:hover{{background:#dbeafe}}
+.info-box{{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:.9rem 1.1rem;font-size:.8rem;color:#1e3a8a;margin-bottom:1.5rem;line-height:1.7}}
+.import-steps{{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:.9rem 1.1rem;font-size:.8rem;color:#14532d;margin:.75rem 0 1rem;line-height:1.8}}
+.import-steps strong{{display:block;margin-bottom:.2rem;font-size:.82rem}}
+@media(max-width:600px){{.wf-meta{{flex-direction:column}}}}
+</style>
+</head>
+<body>
+<header style="background:#0f172a;color:#f1f5f9;padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem">
+  <div><div style="font-size:1.25rem;font-weight:700;letter-spacing:-.02em">vuln<em style="color:#60a5fa;font-style:normal">feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <a class="hlink" href="/grafana.html">Grafana</a>
+    <a class="hlink" href="/agents.html">Agents</a>
+    <a class="hlink" href="/api.html">API</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1>&#9889; n8n Security Automation with vulnfeed</h1>
+  <p class="sub">Four import-ready n8n workflows that connect vulnfeed's CVE feed to Slack, email, Jira, and PagerDuty. Copy the JSON, import into n8n, configure your credentials — done.</p>
+
+  <div class="toc">
+    <a href="#setup">Setup</a>
+    <a href="#wf1">Slack KEV alert</a>
+    <a href="#wf2">Weekly email digest</a>
+    <a href="#wf3">Jira tickets</a>
+    <a href="#wf4">PagerDuty</a>
+    <a href="#tips">Tips</a>
+  </div>
+
+  <div class="info-box">
+    <strong>&#128279; Data source</strong>
+    All workflows fetch <code style="font-family:monospace">{_API}</code> — a public JSON array of {'{'}10k–15k{'}'} CVEs updated every 4 hours. No API key, no rate limits, CORS open. Fields: <code style="font-family:monospace">id, title, severity, score, epss_pct, badge, poc, published, affected, references</code>.
+  </div>
+
+  <!-- Setup -->
+  <div class="section" id="setup">
+    <h2>Prerequisites</h2>
+    <ol class="step-list">
+      <li>A running n8n instance — <a href="https://docs.n8n.io/hosting/" style="color:#2563eb">self-hosted</a> or <a href="https://n8n.io/cloud/" style="color:#2563eb">n8n Cloud</a>.</li>
+      <li>Credentials configured in n8n for whichever destination you use (Slack, SMTP, Jira, or PagerDuty routing key).</li>
+      <li>To import: open n8n → <strong>Workflows → New → ⋮ → Import from JSON</strong>, paste the workflow JSON below, save, and activate.</li>
+      <li>Replace placeholder values (<code style="font-family:monospace">$vars.SLACK_WEBHOOK</code>, <code style="font-family:monospace">security@yourcompany.com</code>, etc.) with real values via <strong>n8n → Settings → Variables</strong> or directly in each node.</li>
+    </ol>
+    <div class="import-steps">
+      <strong>&#9654; How to import a workflow JSON in n8n</strong>
+      Workflows menu → <strong>+</strong> (new workflow) → top-right <strong>⋮</strong> menu → <strong>Import from JSON</strong> → paste → Save → toggle <strong>Active</strong>.
+    </div>
+  </div>
+
+  <!-- WF1: Slack KEV -->
+  <div class="section" id="wf1">
+    <h2>Workflow 1 &mdash; Slack alert for actively exploited CVEs</h2>
+    <div class="wf-card">
+      <h3><span class="tag tag-slack">Slack</span> KEV alert every 4 hours</h3>
+      <p class="wf-desc">Runs every 4 hours, fetches vulnfeed, filters CVEs on the CISA Known Exploited Vulnerabilities list, and posts a formatted Slack message with CVE ID, severity, CVSS score, EPSS percentile, and a link to the CVE detail page. Skips silently if nothing new.</p>
+      <div class="wf-meta">
+        <span class="chip chip-trigger">&#9201; Every 4h</span>
+        <span class="chip chip-dest">&#35; Slack webhook</span>
+        <span class="chip chip-cond">&#10003; Only if KEV CVEs exist</span>
+      </div>
+      <div class="wf-label">Configuration</div>
+      <ul style="font-size:.8rem;line-height:1.9;padding-left:1.1rem;color:#475569">
+        <li>Set <code style="font-family:monospace">SLACK_WEBHOOK</code> variable in n8n Settings → Variables to your Slack incoming webhook URL (<strong>Slack → Apps → Incoming Webhooks</strong>).</li>
+        <li>The Code node filters only <code style="font-family:monospace">badge === "ACTIVELY EXPLOITED"</code> entries and formats up to 8 CVEs per message.</li>
+        <li>To add a severity filter (e.g. only CRITICAL), add <code style="font-family:monospace">&amp;&amp; v.severity === 'CRITICAL'</code> to the filter.</li>
+      </ul>
+      <div class="wf-label">JavaScript — Code node</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf1_code}</pre>
+      <div class="wf-label">Import JSON — paste into n8n</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf1_json}</pre>
+    </div>
+  </div>
+
+  <!-- WF2: Email digest -->
+  <div class="section" id="wf2">
+    <h2>Workflow 2 &mdash; Weekly email digest</h2>
+    <div class="wf-card">
+      <h3><span class="tag tag-email">Email</span> Monday 9am HTML digest</h3>
+      <p class="wf-desc">Fires every Monday at 9am. Pulls all CVEs published in the last 7 days, sorts by severity and score, and sends a styled HTML email with a table of the top 20. Includes stat summary (total, critical, KEV, PoC) and links to the vulnfeed new-this-week page.</p>
+      <div class="wf-meta">
+        <span class="chip chip-trigger">&#128197; Monday 9am</span>
+        <span class="chip chip-dest">&#128231; SMTP / email</span>
+        <span class="chip chip-cond">&#128313; Top 20 by severity</span>
+      </div>
+      <div class="wf-label">Configuration</div>
+      <ul style="font-size:.8rem;line-height:1.9;padding-left:1.1rem;color:#475569">
+        <li>Add an <strong>SMTP credential</strong> in n8n (Settings → Credentials → SMTP). Gmail, Sendgrid, SES, Postfix all work.</li>
+        <li>Update <code style="font-family:monospace">fromEmail</code> and <code style="font-family:monospace">toEmail</code> in the Send Email node. Use a comma-separated list for multiple recipients.</li>
+        <li>To filter by product, add <code style="font-family:monospace">&amp;&amp; (v.title||'').toLowerCase().includes('nginx')</code> to the filter.</li>
+      </ul>
+      <div class="wf-label">JavaScript — Code node</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf2_code}</pre>
+      <div class="wf-label">Import JSON — paste into n8n</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf2_json}</pre>
+    </div>
+  </div>
+
+  <!-- WF3: Jira -->
+  <div class="section" id="wf3">
+    <h2>Workflow 3 &mdash; Jira ticket per critical KEV CVE</h2>
+    <div class="wf-card">
+      <h3><span class="tag tag-jira">Jira</span> Auto-create security tasks</h3>
+      <p class="wf-desc">Checks every 4 hours for CRITICAL severity CVEs that are on the CISA KEV list. Creates one Jira issue per new CVE with severity, CVSS, EPSS, description, and a link to the vulnfeed CVE page. Skips CVEs already seen using n8n Variables as a simple state store.</p>
+      <div class="wf-meta">
+        <span class="chip chip-trigger">&#9201; Every 4h</span>
+        <span class="chip chip-dest">&#128203; Jira issue</span>
+        <span class="chip chip-cond">&#128308; CRITICAL + KEV only</span>
+      </div>
+      <div class="wf-label">Configuration</div>
+      <ul style="font-size:.8rem;line-height:1.9;padding-left:1.1rem;color:#475569">
+        <li>Add a <strong>Jira credential</strong> in n8n (API token from <strong>Atlassian account → Security → API tokens</strong>).</li>
+        <li>Change <code style="font-family:monospace">"project": {{"value": "SEC"}}</code> to your actual Jira project key.</li>
+        <li>Change issue type from <code style="font-family:monospace">Task</code> to <code style="font-family:monospace">Bug</code> or a custom type if your project uses one for security issues.</li>
+        <li>The <code style="font-family:monospace">SEEN_IDS</code> variable prevents duplicate tickets — create it in Settings → Variables with an initial value of <code style="font-family:monospace">[]</code>. Add a Set node after Jira creation to update it if needed.</li>
+      </ul>
+      <div class="wf-label">JavaScript — Code node</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf3_code}</pre>
+      <div class="wf-label">Import JSON — paste into n8n</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf3_json}</pre>
+    </div>
+  </div>
+
+  <!-- WF4: PagerDuty -->
+  <div class="section" id="wf4">
+    <h2>Workflow 4 &mdash; PagerDuty alert for CVSS 9+ actively exploited</h2>
+    <div class="wf-card">
+      <h3><span class="tag tag-pd">PagerDuty</span> Page on-call for critical exploits</h3>
+      <p class="wf-desc">Pages your on-call rotation when a CVE with CVSS &ge;9.0 is either actively exploited (CISA KEV) or has a public PoC. Uses PagerDuty's Events API v2 with <code style="font-family:monospace">dedup_key = CVE ID</code> so the same CVE won't fire duplicate alerts. Sends structured payload with severity, EPSS, affected component, and deep link.</p>
+      <div class="wf-meta">
+        <span class="chip chip-trigger">&#9201; Every 4h</span>
+        <span class="chip chip-dest">&#128242; PagerDuty</span>
+        <span class="chip chip-cond">&#128308; CVSS &ge;9 + KEV or PoC</span>
+      </div>
+      <div class="wf-label">Configuration</div>
+      <ul style="font-size:.8rem;line-height:1.9;padding-left:1.1rem;color:#475569">
+        <li>Get your <strong>Integration Key</strong> from PagerDuty: <strong>Services → your service → Integrations → Add integration → Events API v2</strong>.</li>
+        <li>Set the <code style="font-family:monospace">PAGERDUTY_KEY</code> variable in n8n Settings → Variables.</li>
+        <li>The <code style="font-family:monospace">dedup_key</code> is set to the CVE ID — PagerDuty will suppress duplicate events for the same CVE until it's acknowledged.</li>
+        <li>Adjust the CVSS threshold (<code style="font-family:monospace">>= 9.0</code>) or severity filter in the Code node to tune alert volume.</li>
+      </ul>
+      <div class="wf-label">JavaScript — Code node</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf4_code}</pre>
+      <div class="wf-label">Import JSON — paste into n8n</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>{wf4_json}</pre>
+    </div>
+  </div>
+
+  <!-- Tips -->
+  <div class="section" id="tips">
+    <h2>&#128161; Tips &amp; patterns</h2>
+    <div class="wf-card" style="padding:1.25rem 1.5rem">
+      <div class="wf-label">Filter by product / team ownership</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button>// Add to any Code node filter to match specific products
+const MY_PRODUCTS = ['nginx', 'kubernetes', 'openssh', 'postgres', 'redis'];
+const relevant = vulns.filter(v =>
+  MY_PRODUCTS.some(p =>
+    (v.title || '').toLowerCase().includes(p) ||
+    (v.affected || []).some(a => a.toLowerCase().includes(p))
+  )
+);</pre>
+
+      <div class="wf-label">Deduplicate with n8n Variables (avoid repeat alerts)</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button">// At the start of your Code node
+const seen = new Set(JSON.parse($vars.SEEN_CVE_IDS || '[]'));
+const fresh = vulns.filter(v => !seen.has(v.id));
+
+// After processing, update the seen set (add a Set Variable node after)
+// Set SEEN_CVE_IDS = JSON.stringify([...seen, ...fresh.map(v => v.id)].slice(-500))</pre>
+
+      <div class="wf-label">EPSS-based filtering (exploitation probability)</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button">// EPSS percentile: 90 = top 10% most likely to be exploited
+// Good thresholds: 70 for "watch", 90 for "act now"
+const highRisk = vulns.filter(v =>
+  (v.epss_pct || 0) >= 90 &&
+  (v.score     || 0) >= 7.0
+).sort((a, b) => (b.epss_pct || 0) - (a.epss_pct || 0));</pre>
+
+      <div class="wf-label">Post to Microsoft Teams instead of Slack</div>
+      <pre><button class="copy-btn" onclick="copyCode(this)">Copy</button">// Teams uses Adaptive Cards via webhook — replace the Slack HTTP Request node with:
+// Method: POST, URL: $vars.TEAMS_WEBHOOK
+// Body (JSON):
+{{
+  "type": "message",
+  "attachments": [{{
+    "contentType": "application/vnd.microsoft.card.adaptive",
+    "content": {{
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard", "version": "1.4",
+      "body": [
+        {{"type":"TextBlock","text":"🚨 vulnfeed KEV Alert","weight":"Bolder","size":"Medium"}},
+        {{"type":"TextBlock","text":"={{ $json.text }}","wrap":true}}
+      ],
+      "actions": [{{"type":"Action.OpenUrl","title":"View patch list","url":"https://vulnfeed.it/patch-now.html"}}]
+    }}
+  }}]
+}}</pre>
+    </div>
+  </div>
+
+  <p style="margin-top:2.5rem;font-size:.75rem;color:#64748b">
+    vulnfeed JSON API: <a href="{_API}" style="color:#2563eb">{_API}</a> — open, no auth, updated every 4h.<br>
+    More integrations: <a href="/grafana.html" style="color:#2563eb">Grafana &amp; Prometheus</a> · <a href="/agents.html" style="color:#2563eb">AI agents</a> · <a href="/api.html" style="color:#2563eb">API docs</a>
+  </p>
+</div>
+<script>
+function copyCode(btn) {{
+  const pre = btn.parentElement;
+  const text = pre.childNodes[pre.childNodes.length - 1].textContent;
+  navigator.clipboard.writeText(text).then(() => {{
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1800);
+  }});
+}}
+</script>
+</body>
+</html>"""
+
+    with open("n8n.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log("  Written: n8n.html")
+
+
 def write_monthly_archive_pages(hist_dates, date_str, base_url=BASE_URL):
     """Generate /archive/YYYY-MM.html per month + /archive/index.html."""
     os.makedirs("archive", exist_ok=True)
@@ -6875,6 +7508,7 @@ def main():
     write_how_to_scan_page()
     write_api_docs_page()
     write_grafana_page()
+    write_n8n_guide_page()
     write_agents_page()
     write_llms_txt(vulns, date_str)
     log("Writing vendor pages...")

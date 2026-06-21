@@ -18,12 +18,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Send weekly digest (all CVEs)
+      - name: Send weekly digest (all subscribers)
         env:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
         run: python3 send_digest.py
 
-      - name: Send infrastructure digest (Kubernetes / OpenStack / Kernel / nginx)
+      - name: Send per-topic filtered digests
         env:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
-        run: python3 send_digest.py --vendors
+        run: |
+          for topic in kubernetes linux-kernel ubuntu debian windows openstack macos cisco fortinet vmware android nginx; do
+            echo "--- topic: $topic ---"
+            python3 send_digest.py --topic "$topic" || echo "[warn] $topic failed, continuing"
+          done

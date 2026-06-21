@@ -50,6 +50,75 @@ VENDOR_AUTHORITATIVE_SOURCES = {
 # — prevents broad keyword matches on unrelated CVEs
 VENDOR_TITLE_ONLY = {"nginx-traefik"}
 
+# Filtered digest topics — each corresponds to a Buttondown subscriber tag.
+# "sources": only vulns from these sources are considered (empty = all sources)
+# "keywords": must appear in title/description/affected (empty = all from source)
+# "title_only": keyword must appear in title only (avoids noisy matches)
+TOPIC_GROUPS = {
+    "kubernetes": {
+        "label": "Kubernetes",
+        "sources": {"kubernetes"},
+        "keywords": ["kubernetes", "k8s", "etcd", "kubectl", "kubelet", "kube"],
+    },
+    "linux-kernel": {
+        "label": "Linux Kernel",
+        "sources": {"ubuntu", "debian"},
+        "keywords": ["linux kernel", "kernel", "kvm", "bpf", "ebpf", "netfilter", "nftables"],
+    },
+    "ubuntu": {
+        "label": "Ubuntu",
+        "sources": {"ubuntu"},
+        "keywords": [],
+    },
+    "debian": {
+        "label": "Debian",
+        "sources": {"debian"},
+        "keywords": [],
+    },
+    "windows": {
+        "label": "Windows",
+        "sources": {"microsoft"},
+        "keywords": ["windows"],
+        "title_only": True,
+    },
+    "openstack": {
+        "label": "OpenStack",
+        "sources": {"openstack", "oss-security"},
+        "keywords": ["openstack", "nova", "neutron", "keystone", "cinder", "glance", "ironic"],
+    },
+    "macos": {
+        "label": "macOS / Apple",
+        "sources": {"apple"},
+        "keywords": [],
+    },
+    "cisco": {
+        "label": "Cisco",
+        "sources": {"cisco"},
+        "keywords": [],
+    },
+    "fortinet": {
+        "label": "Fortinet",
+        "sources": {"fortinet"},
+        "keywords": [],
+    },
+    "vmware": {
+        "label": "VMware / Broadcom",
+        "sources": {"vmware"},
+        "keywords": ["vmware", "vsphere", "vcenter", "esxi", "horizon", "aria"],
+    },
+    "android": {
+        "label": "Android",
+        "sources": {"android"},
+        "keywords": [],
+    },
+    "nginx": {
+        "label": "nginx",
+        "sources": set(),
+        "keywords": ["nginx", "traefik"],
+        "title_only": True,
+    },
+}
+
 
 def load_week():
     """Merge last 7 days of snapshots, newest first, dedup by CVE id."""
@@ -278,6 +347,92 @@ def enrich(v, score_idx):
     return merged
 
 
+def topic_match(v, topic):
+    """Return True if vuln v belongs to the given topic config dict."""
+    sources = topic.get("sources") or set()
+    keywords = topic.get("keywords") or []
+    title_only = topic.get("title_only", False)
+    src_ok = (not sources) or (v.get("source", "").lower() in sources)
+    if not keywords:
+        return src_ok
+    if title_only:
+        hay = (v.get("title") or "").lower()
+    else:
+        hay = " ".join([
+            v.get("id", ""), v.get("title", ""), v.get("description", ""),
+            *v.get("affected", []),
+        ]).lower()
+    kw_ok = any(kw in hay for kw in keywords)
+    return src_ok and kw_ok if sources else kw_ok
+
+
+def build_topic_email_html(vulns, week_end, slug):
+    """Build a filtered digest email for a single topic."""
+    topic = TOPIC_GROUPS[slug]
+    score_idx = build_score_index(vulns)
+    pool = [enrich(v, score_idx) for v in vulns]
+    matched = sorted(
+        [v for v in pool if topic_match(v, topic)],
+        key=lambda v: (
+            0 if v.get("kev") else 1,
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
+            -(v.get("epss") or 0),
+            -(v.get("score") or 0),
+        ),
+    )[:20]
+
+    if not matched:
+        return None
+
+    n_crit = sum(1 for v in matched if v.get("severity") == "CRITICAL")
+    n_kev  = sum(1 for v in matched if v.get("kev"))
+    kev_str = f" &mdash; <strong>{n_kev} actively exploited</strong>" if n_kev else ""
+    digest_url = f"{BASE_URL}/digest/{week_end}.html"
+    cards = "".join(cve_card(v) for v in matched)
+    label = xe(topic["label"])
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;margin:0;padding:0">
+<div style="max-width:640px;margin:0 auto;padding:2rem 1rem">
+
+  <div style="background:#0f172a;padding:1.2rem 1.8rem;border-radius:10px 10px 0 0">
+    <span style="font-size:1.3rem;font-weight:800;color:#f1f5f9">vuln<span style="color:#60a5fa">feed</span></span>
+    <span style="font-size:.75rem;color:#94a3b8;margin-left:1rem">{label} digest &mdash; {xe(week_end)}</span>
+  </div>
+
+  <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:1.5rem 1.8rem">
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:.85rem 1.1rem;
+                margin-bottom:1.5rem;font-size:.85rem;color:#1e3a8a;line-height:1.6">
+      <strong>TL;DR &mdash;</strong> {len(matched)} <strong>{label}</strong> CVEs this week
+      &mdash; <span style="color:#dc2626;font-weight:700">{n_crit} critical</span>{kev_str}.
+    </div>
+    <div style="font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;
+                letter-spacing:.08em;margin-bottom:.6rem">{label} &mdash; top CVEs</div>
+    {cards}
+    <p style="margin:1.6rem 0 0;font-size:.82rem;color:#64748b;text-align:center;border-top:1px solid #e2e8f0;padding-top:1rem">
+      <a href="{digest_url}" style="color:#2563eb;font-weight:600;text-decoration:none">Full digest &rarr;</a>
+      &nbsp;&middot;&nbsp;
+      <a href="{BASE_URL}/" style="color:#2563eb;font-weight:600;text-decoration:none">Live feed</a>
+      &nbsp;&middot;&nbsp;
+      <a href="{BASE_URL}/feed.xml" style="color:#2563eb;font-weight:600;text-decoration:none">RSS</a>
+    </p>
+  </div>
+
+  <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-top:none;padding:.75rem 1.8rem;
+              border-radius:0 0 10px 10px;text-align:center">
+    <span style="font-size:.7rem;color:#94a3b8">
+      vulnfeed {label} digest. You subscribed to this topic.
+      <a href="{{{{ unsubscribe_url }}}}" style="color:#94a3b8">Unsubscribe</a>
+    </span>
+  </div>
+
+</div>
+</body>
+</html>"""
+
+
 def match_vendor(v, keywords, title_only=False):
     if title_only:
         haystack = (v.get("title") or "").lower()
@@ -399,12 +554,15 @@ def build_vendor_email_html(vulns, week_end):
 </html>""", total_matched
 
 
-def send(api_key, subject, html_body):
-    payload = json.dumps({
+def send(api_key, subject, html_body, tag=None):
+    data = {
         "subject": subject,
         "body": html_body,
         "status": "about_to_send",
-    }).encode()
+    }
+    if tag:
+        data["filters"] = [{"type": "tag", "value": tag}]
+    payload = json.dumps(data).encode()
     req = Request(
         BUTTONDOWN_API,
         data=payload,
@@ -433,8 +591,12 @@ def send(api_key, subject, html_body):
 
 
 def main():
-    dry_run      = "--dry-run" in sys.argv
-    vendor_mode  = "--vendors" in sys.argv
+    dry_run     = "--dry-run" in sys.argv
+    vendor_mode = "--vendors" in sys.argv
+    topic_slug  = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--topic" and i + 1 < len(sys.argv):
+            topic_slug = sys.argv[i + 1]
 
     api_key = os.environ.get("BUTTONDOWN_API_KEY")
     if not api_key and not dry_run:
@@ -448,7 +610,20 @@ def main():
 
     print(f"[digest] {len(vulns)} vulns from last 7 days, week ending {week_end}")
 
-    if vendor_mode:
+    if topic_slug:
+        if topic_slug not in TOPIC_GROUPS:
+            print(f"[error] Unknown topic '{topic_slug}'. Valid: {', '.join(TOPIC_GROUPS)}", file=sys.stderr)
+            sys.exit(1)
+        html_body = build_topic_email_html(vulns, week_end, topic_slug)
+        if not html_body:
+            print(f"[topic:{topic_slug}] No CVEs matched — skipping")
+            return
+        label = TOPIC_GROUPS[topic_slug]["label"]
+        subject = f"vulnfeed {label} digest — {week_end}"
+        preview_path = f"/tmp/digest_{topic_slug}_preview.html"
+        tag = topic_slug
+        print(f"[topic:{topic_slug}] Subject: {subject}")
+    elif vendor_mode:
         html_body, n_matched = build_vendor_email_html(vulns, week_end)
         if not html_body:
             print("[vendors] No CVEs matched any vendor group — skipping")
@@ -456,13 +631,14 @@ def main():
         subject = f"vulnfeed infra digest: Kubernetes · OpenStack · Kernel · nginx — {week_end}"
         print(f"[vendors] {n_matched} CVEs across {len(VENDOR_GROUPS)} vendor groups")
         preview_path = "/tmp/digest_vendors_preview.html"
+        tag = None
     else:
         n_crit = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
         subject = f"vulnfeed weekly: {len(vulns)} CVEs · {n_crit} critical — {week_end}"
         html_body = build_email_html(vulns, week_end)
         preview_path = "/tmp/digest_preview.html"
-
-    print(f"[digest] Subject: {subject}")
+        tag = None
+        print(f"[digest] Subject: {subject}")
 
     if dry_run:
         with open(preview_path, "w", encoding="utf-8") as f:
@@ -470,7 +646,7 @@ def main():
         print(f"[dry-run] HTML written to {preview_path}")
         return
 
-    ok = send(api_key, subject, html_body)
+    ok = send(api_key, subject, html_body, tag=tag)
     sys.exit(0 if ok else 1)
 
 

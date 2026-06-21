@@ -2039,7 +2039,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 /* Subscribe modal */
 #sub-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:999;align-items:center;justify-content:center}
 #sub-modal.open{display:flex}
-#sub-modal-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:2rem;max-width:360px;width:90%;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#sub-modal-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:2rem;max-width:420px;width:90%;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.6)}
 #sub-close{position:absolute;top:.6rem;right:.85rem;background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;padding:0}
 #sub-close:hover{color:#f1f5f9}
 #sub-modal h2{margin:0 0 .35rem;font-size:1.05rem;color:#f1f5f9}
@@ -2050,6 +2050,10 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #sub-form input[type=email]::placeholder{color:#64748b}
 #sub-form button{padding:.5rem .9rem;border-radius:6px;background:#2563eb;color:#fff;border:none;font-size:.85rem;font-weight:600;cursor:pointer}
 #sub-form button:hover{background:#1d4ed8}
+#sub-topics-label{font-size:.73rem;color:#64748b;margin:.6rem 0 .35rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+#sub-topics{display:grid;grid-template-columns:1fr 1fr;gap:.22rem .6rem;margin-bottom:.75rem}
+#sub-topics label{display:flex;align-items:center;gap:.38rem;font-size:.78rem;color:#cbd5e1;cursor:pointer;user-select:none}
+#sub-topics input[type=checkbox]{accent-color:#2563eb;width:13px;height:13px;flex-shrink:0}
 #sub-modal-thanks{font-size:.88rem;color:#4ade80;text-align:center;padding:.5rem 0;display:none}
 #sub-open-btn{padding:.22rem .7rem;border-radius:5px;background:transparent;color:#94a3b8;border:1px solid #334155;font-size:.75rem;cursor:pointer;white-space:nowrap}
 #sub-open-btn:hover{border-color:#60a5fa;color:#f1f5f9}
@@ -2696,6 +2700,21 @@ document.getElementById("shareBtn").addEventListener("click",function(){
     <p>Top CVEs every Monday. No spam, unsubscribe anytime.</p>
     <form id="sub-form">
       <input type="email" name="email" placeholder="you@company.com" required>
+      <div id="sub-topics-label">Topics &mdash; leave blank for everything</div>
+      <div id="sub-topics">
+        <label><input type="checkbox" value="kubernetes"> Kubernetes</label>
+        <label><input type="checkbox" value="windows"> Windows</label>
+        <label><input type="checkbox" value="linux-kernel"> Linux Kernel</label>
+        <label><input type="checkbox" value="ubuntu"> Ubuntu</label>
+        <label><input type="checkbox" value="debian"> Debian</label>
+        <label><input type="checkbox" value="openstack"> OpenStack</label>
+        <label><input type="checkbox" value="cisco"> Cisco</label>
+        <label><input type="checkbox" value="fortinet"> Fortinet</label>
+        <label><input type="checkbox" value="vmware"> VMware</label>
+        <label><input type="checkbox" value="macos"> macOS</label>
+        <label><input type="checkbox" value="android"> Android</label>
+        <label><input type="checkbox" value="nginx"> nginx</label>
+      </div>
       <button type="submit">Subscribe</button>
     </form>
     <div id="sub-modal-thanks">&#10003; Subscribed &mdash; see you Monday!</div>
@@ -2721,6 +2740,7 @@ try{(function(){
     const btn=form.querySelector('button[type=submit]');
     if(btn){btn.disabled=true;btn.textContent="Sending…";}
     const body=new URLSearchParams({email:email,embed:"1"});
+    form.querySelectorAll('#sub-topics input:checked').forEach(cb=>body.append('tag',cb.value));
     function _done(){
       try{localStorage.setItem("vf_subscribed","1");}catch(_){}
       if(form)form.style.display="none";

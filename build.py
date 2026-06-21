@@ -2681,6 +2681,9 @@ document.getElementById("shareBtn").addEventListener("click",function(){
     D.forEach(v=>{v._ts=_toTS(v.published)});
     if(_lastVisit>0){D.forEach(v=>{if(v._ts&&v._ts>_lastVisit)v._unread=true;});}
     setTimeout(()=>localStorage.setItem("vf_lastVisit",String(Date.now())),2000);
+    const _nNew=D.filter(v=>v._new).length;
+    const _np=document.getElementById("newPill");
+    if(_np&&_nNew>0)_np.textContent="New ("+_nNew+")";
     if(loadEl)loadEl.style.display="none";
     applyHash();
     applyFilters();
@@ -3197,6 +3200,9 @@ tr:last-child td{border-bottom:none}
 tr:hover td{background:#f8fafc}
 .sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
 .sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+.heatmap-days{display:flex;gap:3px;flex-wrap:wrap;padding-bottom:.25rem}
+.hday{width:20px;height:20px;border-radius:3px;flex-shrink:0;cursor:default}
+.heatmap-legend{display:flex;align-items:center;gap:.35rem;margin-top:.6rem;font-size:.72rem;color:var(--muted)}
 @media(max-width:640px){.wrap{padding:1rem}.hbar-label{width:80px}}
 </style>
 </head>
@@ -3237,6 +3243,11 @@ tr:hover td{background:#f8fafc}
 </div>
 
 <div class="section">
+  <h2>Daily severity heatmap</h2>
+  __HEATMAP__
+</div>
+
+<div class="section">
   <h2>Top affected products / packages</h2>
   <table>
     <tr><th>Product</th><th style="text-align:right">CVEs</th><th style="text-align:right">Max CVSS</th><th>Worst severity</th></tr>
@@ -3256,6 +3267,54 @@ tr:hover td{background:#f8fafc}
 </body>
 </html>
 """
+
+
+def _build_heatmap_html():
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    SEV_COLOR = {"CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#d97706", "LOW": "#16a34a", "UNKNOWN": "#94a3b8"}
+    if not os.path.isdir("historical"):
+        return "<p style='color:#64748b;font-size:.8rem'>No historical data yet.</p>"
+    date_files = sorted(
+        f[:-5] for f in os.listdir("historical")
+        if f.endswith(".json") and f != "index.json"
+    )
+    if not date_files:
+        return "<p style='color:#64748b;font-size:.8rem'>No historical data yet.</p>"
+    squares = []
+    for ds in date_files:
+        path = os.path.join("historical", f"{ds}.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                day_vulns = json.load(f)
+        except Exception:
+            continue
+        if not day_vulns:
+            color = "#e2e8f0"
+            tip = f"{ds}: no data"
+        else:
+            worst_sev = min(
+                (v.get("severity", "UNKNOWN") for v in day_vulns),
+                key=lambda s: SEV_ORDER.get(s, 4)
+            )
+            color = SEV_COLOR.get(worst_sev, "#e2e8f0")
+            n_crit = sum(1 for v in day_vulns if v.get("severity") == "CRITICAL")
+            tip = f"{ds}: {len(day_vulns):,} CVEs"
+            if n_crit:
+                tip += f" ({n_crit} critical)"
+        squares.append(f'<div class="hday" style="background:{color}" title="{_xe(tip)}"></div>')
+    return (
+        f'<div class="heatmap-days">{"".join(squares)}</div>'
+        f'<div class="heatmap-legend">'
+        f'<span>Low</span>'
+        f'<div class="hday" style="background:#16a34a"></div>'
+        f'<div class="hday" style="background:#d97706"></div>'
+        f'<div class="hday" style="background:#ea580c"></div>'
+        f'<div class="hday" style="background:#dc2626"></div>'
+        f'<span>Critical</span>'
+        f'&nbsp;&nbsp;<div class="hday" style="background:#e2e8f0"></div>'
+        f'<span>No data</span>'
+        f'</div>'
+    )
 
 
 def _hbar(label, count, max_count, color):
@@ -3365,6 +3424,7 @@ def write_stats_page(vulns, date_str, base_url=BASE_URL):
     html = html.replace("__SEV_BARS__", sev_bars)
     html = html.replace("__SRC_BARS__", src_bars)
     html = html.replace("__CVSS_BARS__", cvss_bars)
+    html = html.replace("__HEATMAP__", _build_heatmap_html())
     html = html.replace("__TOP_PRODUCTS__", top_products_html)
     html = html.replace("__TOP_EPSS__", top_epss_html)
 

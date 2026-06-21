@@ -1888,6 +1888,9 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
 
     entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
     entries.append(url_entry(f"{base_url}/trending.html", "hourly", "0.8"))
+    entries.append(url_entry(f"{base_url}/patch-now.html", "hourly", "0.9"))
+    entries.append(url_entry(f"{base_url}/zero-days.html", "hourly", "0.9"))
+    entries.append(url_entry(f"{base_url}/grafana.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
     entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
@@ -2193,11 +2196,14 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
     <div class="hmeta" style="margin-top:.35rem">NVD &middot; Ubuntu &middot; Debian &middot; CISA KEV &middot; OSS-Security &middot; OpenStack &middot; Kubernetes &middot; Exploit-DB &middot; Red Hat &middot; GitHub &middot; OSV</div>
     <div style="margin-top:.5rem;display:flex;gap:.4rem;align-items:center;justify-content:flex-end;flex-wrap:wrap">
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
+      <a class="hlink" href="/patch-now.html" style="border-color:#7c3aed;color:#a78bfa">&#128683;&nbsp;Patch now</a>
+      <a class="hlink" href="/zero-days.html" style="border-color:#dc2626;color:#f87171">&#9888;&nbsp;0-days</a>
       <a class="hlink" href="/trending.html">&#128200;&nbsp;Trending</a>
       <a class="hlink" href="/stats.html">Stats</a>
       <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
       <a class="hlink" href="/archive/">Archive</a>
       <a class="hlink" href="/how-to-scan.html">&#128737;&nbsp;How to scan</a>
+      <a class="hlink" href="/grafana.html">&#128202;&nbsp;Grafana</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/api.html">API</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
@@ -5051,6 +5057,585 @@ tr:hover td{{background:var(--bg)}}
 
 
 # ---------------------------------------------------------------------------
+# Patch Now page
+# ---------------------------------------------------------------------------
+
+_PAGE_CSS = """\
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.logo{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}.logo em{color:#60a5fa;font-style:normal}
+.hlink{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}
+.hlink:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+.wrap{max-width:1100px;margin:0 auto;padding:2rem}
+h1{font-size:1.35rem;font-weight:800;margin-bottom:.25rem}
+h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:2rem 0 .75rem;display:flex;align-items:center;gap:.5rem}
+.sub{font-size:.8rem;color:var(--muted);margin-bottom:1.75rem}
+table{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:var(--bg)}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg)}
+.cve-id{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.cve-id:hover{text-decoration:underline}
+.sev{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}
+.sCRITICAL{background:var(--crit)}.sHIGH{background:var(--high)}.sMEDIUM{background:var(--med)}.sLOW{background:var(--low)}.sUNKNOWN{background:var(--unk)}
+.src-tag{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}
+.ttl{font-size:.78rem}
+.badge-kev{display:inline-block;background:#7c3aed;color:#fff;border-radius:3px;padding:.04rem .3rem;font-size:.6rem;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.badge-poc{display:inline-block;background:#dc2626;color:#fff;border-radius:3px;padding:.04rem .3rem;font-size:.6rem;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.badge-epss{display:inline-block;background:#0369a1;color:#fff;border-radius:3px;padding:.04rem .3rem;font-size:.6rem;font-weight:700;white-space:nowrap}
+.empty{text-align:center;padding:4rem 2rem;color:var(--muted)}
+.info-box{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:1rem 1.25rem;font-size:.8rem;color:#1e3a8a;margin-bottom:1.75rem;line-height:1.7}
+.info-box strong{display:block;margin-bottom:.25rem}
+@media(max-width:640px){.wrap{padding:1rem}th:nth-child(4),td:nth-child(4){display:none}}"""
+
+
+def _page_head(title, desc, canonical, date_str, extra_css=""):
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>{title}</title>
+<meta name="description" content="{desc}">
+<link rel="canonical" href="{canonical}">
+<style>{_PAGE_CSS}{extra_css}</style>
+</head>"""
+
+
+def _page_header(back_href="/", back_label="&#8592; Back to feed", extra_links=""):
+    return f"""<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="{back_href}">{back_label}</a>
+    {extra_links}
+  </div>
+</header>"""
+
+
+def _vuln_row(v, reason_html):
+    sev = v.get("severity", "UNKNOWN")
+    sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+    epss_str = f'{v["epss_pct"]:.0f}%' if v.get("epss_pct") is not None else "—"
+    pub = _pub_ymd(v.get("published") or "")
+    ttl = _xe((v.get("title") or v["id"])[:120])
+    vid = _xe(v["id"])
+    href = f'/cve/{v["id"]}.html' if v["id"].startswith("CVE-") else _xe(v.get("url", ""))
+    return (
+        f'<tr>'
+        f'<td><a class="cve-id" href="{href}">{vid}</a></td>'
+        f'<td class="ttl">{ttl}</td>'
+        f'<td><span class="sev s{sev}">{sev}</span></td>'
+        f'<td>{sc_str}</td>'
+        f'<td>{epss_str}</td>'
+        f'<td>{reason_html}</td>'
+        f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+        f'<td>{pub}</td>'
+        f'</tr>'
+    )
+
+
+def _vuln_table(rows, cols=None):
+    if cols is None:
+        cols = ["CVE / ID", "Title", "Severity", "CVSS", "EPSS", "Why urgent", "Source", "Date"]
+    if not rows:
+        return '<div class="empty">No vulnerabilities match these criteria right now.</div>'
+    ths = "".join(f"<th>{c}</th>" for c in cols)
+    return f'<table><tr>{ths}</tr>{"".join(rows)}</table>'
+
+
+def write_patch_now_page(vulns, date_str, base_url=BASE_URL):
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+
+    p1, p2 = [], []
+    for v in vulns:
+        score = v.get("score") or 0
+        is_kev = v.get("badge") == "ACTIVELY EXPLOITED"
+        has_poc = v.get("poc")
+        epss_pct = v.get("epss_pct") or 0
+
+        if score < 7.0 and epss_pct < 85:
+            continue
+        if is_kev:
+            p1.append(v)
+        elif has_poc and (score >= 7.0 or epss_pct >= 70):
+            p2.append(v)
+
+    def sort_key(v):
+        return (
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
+            -(v.get("epss_pct") or 0),
+            -(v.get("score") or 0),
+        )
+
+    p1.sort(key=sort_key)
+    p2.sort(key=sort_key)
+
+    def reason(v):
+        parts = []
+        if v.get("badge") == "ACTIVELY EXPLOITED":
+            parts.append('<span class="badge-kev">KEV</span>')
+        if v.get("poc"):
+            parts.append('<span class="badge-poc">PoC</span>')
+        if v.get("epss_pct") is not None:
+            parts.append(f'<span class="badge-epss">EPSS {v["epss_pct"]:.0f}%ile</span>')
+        return "&nbsp;".join(parts)
+
+    rows1 = [_vuln_row(v, reason(v)) for v in p1]
+    rows2 = [_vuln_row(v, reason(v)) for v in p2]
+
+    total = len(p1) + len(p2)
+    head = _page_head(
+        f"Patch This Week — {total} Critical Vulnerabilities | vulnfeed",
+        f"{total} vulnerabilities requiring immediate attention: {len(p1)} actively exploited (CISA KEV) and {len(p2)} with public exploit code. Updated every 4 hours.",
+        f"{base_url}/patch-now.html",
+        date_str,
+    )
+
+    html = f"""{head}
+<body>
+{_page_header(extra_links='<a class="hlink" href="/trending.html">Trending</a><a class="hlink" href="/zero-days.html">Zero-days</a>')}
+<div class="wrap">
+  <h1>&#128683; Patch This Week</h1>
+  <p class="sub">Vulnerabilities requiring immediate action — actively exploited in the wild or with public exploit code available. Updated every 4 hours.</p>
+  <div class="info-box">
+    <strong>How this list is built</strong>
+    <b>Tier 1 — Patch now:</b> On CISA Known Exploited Vulnerabilities (KEV) list — confirmed in-the-wild exploitation.<br>
+    <b>Tier 2 — Patch soon:</b> Public proof-of-concept exploit exists with CVSS &ge;7.0 or EPSS &ge;70th percentile.
+  </div>
+  <h2><span style="color:#7c3aed">&#11044;</span> Tier 1 — Patch immediately ({len(p1)} CVEs) <span style="font-size:.65rem;color:#7c3aed;font-weight:600;background:#ede9fe;border-radius:3px;padding:.1rem .4rem">CISA KEV confirmed</span></h2>
+  {_vuln_table(rows1)}
+  <h2 style="margin-top:2.25rem"><span style="color:#dc2626">&#11044;</span> Tier 2 — Patch soon ({len(p2)} CVEs) <span style="font-size:.65rem;color:#dc2626;font-weight:600;background:#fee2e2;border-radius:3px;padding:.1rem .4rem">public exploit code</span></h2>
+  {_vuln_table(rows2)}
+  <p style="margin-top:1.5rem;font-size:.75rem;color:var(--muted)">Updated {date_str}. Source: NVD, CISA KEV, EPSS (FIRST.org). <a href="/api.html" style="color:var(--accent)">JSON API available</a> for automation.</p>
+</div>
+</body>
+</html>"""
+
+    with open("patch-now.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log(f"  Written: patch-now.html ({len(p1)} KEV, {len(p2)} PoC)")
+
+
+# ---------------------------------------------------------------------------
+# Zero-days page
+# ---------------------------------------------------------------------------
+
+def write_zero_days_page(vulns, date_str, base_url=BASE_URL):
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+
+    kev = []
+    poc_only = []
+    for v in vulns:
+        score = v.get("score") or 0
+        is_kev = v.get("badge") == "ACTIVELY EXPLOITED"
+        has_poc = v.get("poc")
+        if is_kev:
+            kev.append(v)
+        elif has_poc and score >= 6.0:
+            poc_only.append(v)
+
+    def sort_key(v):
+        return (SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("epss_pct") or 0), -(v.get("score") or 0))
+
+    kev.sort(key=sort_key)
+    poc_only.sort(key=sort_key)
+
+    def reason_kev(v):
+        parts = ['<span class="badge-kev">KEV — actively exploited</span>']
+        if v.get("poc"):
+            parts.append('<span class="badge-poc">PoC public</span>')
+        if v.get("epss_pct") is not None:
+            parts.append(f'<span class="badge-epss">EPSS {v["epss_pct"]:.0f}%ile</span>')
+        return "&nbsp;".join(parts)
+
+    def reason_poc(v):
+        parts = ['<span class="badge-poc">PoC public</span>']
+        if v.get("epss_pct") is not None:
+            parts.append(f'<span class="badge-epss">EPSS {v["epss_pct"]:.0f}%ile</span>')
+        return "&nbsp;".join(parts)
+
+    rows_kev = [_vuln_row(v, reason_kev(v)) for v in kev]
+    rows_poc = [_vuln_row(v, reason_poc(v)) for v in poc_only]
+
+    total = len(kev) + len(poc_only)
+    head = _page_head(
+        f"Zero-Days & Active Exploits — {total} CVEs | vulnfeed",
+        f"Live tracker of {len(kev)} CVEs actively exploited in the wild (CISA KEV) and {len(poc_only)} with public proof-of-concept exploit code. Updated every 4 hours.",
+        f"{base_url}/zero-days.html",
+        date_str,
+    )
+
+    html = f"""{head}
+<body>
+{_page_header(extra_links='<a class="hlink" href="/patch-now.html">Patch now</a><a class="hlink" href="/trending.html">Trending</a>')}
+<div class="wrap">
+  <h1>&#128683; Zero-Days &amp; Active Exploits</h1>
+  <p class="sub">Vulnerabilities being actively exploited in the wild right now, plus CVEs with public proof-of-concept code. Updated every 4 hours from CISA KEV and NVD.</p>
+  <div class="info-box">
+    <strong>Sources</strong>
+    <b>CISA KEV:</b> U.S. Cybersecurity &amp; Infrastructure Security Agency Known Exploited Vulnerabilities catalog — confirmed in-the-wild exploitation by threat actors.<br>
+    <b>PoC:</b> Public proof-of-concept exploit code exists in the wild (Exploit-DB, GitHub, security research). Exploitation not yet confirmed by CISA but weaponized code is available.
+  </div>
+  <h2><span style="color:#7c3aed">&#11044;</span> Actively exploited in the wild ({len(kev)} CVEs) <span style="font-size:.65rem;color:#7c3aed;font-weight:600;background:#ede9fe;border-radius:3px;padding:.1rem .4rem">CISA KEV confirmed</span></h2>
+  {_vuln_table(rows_kev)}
+  <h2 style="margin-top:2.25rem"><span style="color:#dc2626">&#11044;</span> Public exploit code available ({len(poc_only)} CVEs) <span style="font-size:.65rem;color:#dc2626;font-weight:600;background:#fee2e2;border-radius:3px;padding:.1rem .4rem">not yet KEV-listed</span></h2>
+  {_vuln_table(rows_poc)}
+  <p style="margin-top:1.5rem;font-size:.75rem;color:var(--muted)">Updated {date_str}. KEV source: <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" style="color:var(--accent)">CISA KEV catalog</a>. PoC data aggregated from Exploit-DB and GitHub advisories. <a href="/api.html" style="color:var(--accent)">JSON API</a> available.</p>
+</div>
+</body>
+</html>"""
+
+    with open("zero-days.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log(f"  Written: zero-days.html ({len(kev)} KEV, {len(poc_only)} PoC-only)")
+
+
+# ---------------------------------------------------------------------------
+# Grafana integration page
+# ---------------------------------------------------------------------------
+
+def write_grafana_page(base_url=BASE_URL):
+    _JSON_API = f"{base_url}/vulns.json"
+
+    dashboard_json = """{
+  "title": "vulnfeed CVE Dashboard",
+  "panels": [
+    {
+      "title": "Critical CVEs",
+      "type": "stat",
+      "datasource": "vulnfeed-infinity",
+      "targets": [{
+        "type": "json", "source": "url",
+        "url": "VULNFEED_URL",
+        "parser": "backend",
+        "root_selector": "",
+        "columns": [{"selector": "severity","text": "severity","type": "string"}],
+        "filters": [{"field":"severity","operator":"==","value":"CRITICAL"}]
+      }],
+      "options": {"reduceOptions": {"calcs": ["count"]}}
+    },
+    {
+      "title": "All CVEs by Severity",
+      "type": "piechart",
+      "datasource": "vulnfeed-infinity",
+      "targets": [{
+        "type": "json", "source": "url",
+        "url": "VULNFEED_URL",
+        "parser": "backend",
+        "columns": [
+          {"selector": "severity","text": "Severity","type": "string"},
+          {"selector": "score","text": "Score","type": "number"}
+        ]
+      }],
+      "options": {"pieType": "donut"}
+    },
+    {
+      "title": "Top CVEs by EPSS",
+      "type": "table",
+      "datasource": "vulnfeed-infinity",
+      "targets": [{
+        "type": "json", "source": "url",
+        "url": "VULNFEED_URL",
+        "parser": "backend",
+        "columns": [
+          {"selector": "id","text": "CVE ID","type": "string"},
+          {"selector": "title","text": "Title","type": "string"},
+          {"selector": "severity","text": "Severity","type": "string"},
+          {"selector": "score","text": "CVSS","type": "number"},
+          {"selector": "epss_pct","text": "EPSS %ile","type": "number"},
+          {"selector": "published","text": "Published","type": "string"}
+        ]
+      }],
+      "transformations": [{"id":"sortBy","options":{"fields":[{"desc":true,"displayName":"EPSS %ile"}]}}]
+    }
+  ]
+}""".replace("VULNFEED_URL", _JSON_API)
+
+    prom_script = f"""#!/bin/bash
+# Prometheus textfile exporter for vulnfeed CVE metrics
+# Run via cron every 15min, write to node_exporter textfile dir
+# cron: */15 * * * * /opt/vulnfeed-exporter.sh > /var/lib/node_exporter/textfile_collector/vulnfeed.prom
+
+OUT=$(curl -sf "{_JSON_API}")
+if [ -z "$OUT" ]; then exit 1; fi
+
+CRITICAL=$(echo "$OUT" | jq '[.[] | select(.severity=="CRITICAL")] | length')
+HIGH=$(echo "$OUT"     | jq '[.[] | select(.severity=="HIGH")]     | length')
+MEDIUM=$(echo "$OUT"   | jq '[.[] | select(.severity=="MEDIUM")]   | length')
+KEV=$(echo "$OUT"      | jq '[.[] | select(.badge=="ACTIVELY EXPLOITED")] | length')
+POC=$(echo "$OUT"      | jq '[.[] | select(.poc==true)] | length')
+TOTAL=$(echo "$OUT"    | jq 'length')
+
+cat <<EOF
+# HELP vulnfeed_cves_total Total CVEs tracked by vulnfeed
+# TYPE vulnfeed_cves_total gauge
+vulnfeed_cves_total $TOTAL
+
+# HELP vulnfeed_cves_by_severity CVEs grouped by severity
+# TYPE vulnfeed_cves_by_severity gauge
+vulnfeed_cves_by_severity{{severity="CRITICAL"}} $CRITICAL
+vulnfeed_cves_by_severity{{severity="HIGH"}} $HIGH
+vulnfeed_cves_by_severity{{severity="MEDIUM"}} $MEDIUM
+
+# HELP vulnfeed_kev_total CVEs on CISA KEV (actively exploited)
+# TYPE vulnfeed_kev_total gauge
+vulnfeed_kev_total $KEV
+
+# HELP vulnfeed_poc_total CVEs with public proof-of-concept exploit
+# TYPE vulnfeed_poc_total gauge
+vulnfeed_poc_total $POC
+EOF"""
+
+    slack_script = f"""#!/bin/bash
+# Post new critical KEV CVEs to Slack every 4 hours
+# cron: 0 */4 * * * /opt/vulnfeed-slack.sh
+
+SLACK_WEBHOOK="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+NEW_KEV=$(curl -sf "{_JSON_API}" | jq -r '
+  [.[] | select(.badge=="ACTIVELY EXPLOITED" and .severity=="CRITICAL")]
+  | sort_by(-.score)
+  | .[:5][]
+  | "• *\\(.id)* (\\(.severity) \\(.score // "?"))\\n  \\(.title[:100])\\n  <https://vulnfeed.it/cve/\\(.id).html|Details>"
+' | head -20)
+
+if [ -z "$NEW_KEV" ]; then exit 0; fi
+
+curl -sf -X POST "$SLACK_WEBHOOK" -H 'Content-type: application/json' -d "{{
+  \\"text\\": \\":rotating_light: *vulnfeed — Active Exploits*\\",
+  \\"blocks\\": [
+    {{\\"type\\":\\"header\\",\\"text\\":{{\\"type\\":\\"plain_text\\",\\"text\\":\\":rotating_light: Active CVE Exploits — $(date +%Y-%m-%d)\\"}} }},
+    {{\\"type\\":\\"section\\",\\"text\\":{{\\"type\\":\\"mrkdwn\\",\\"text\\":\\"$NEW_KEV\\"}} }},
+    {{\\"type\\":\\"section\\",\\"text\\":{{\\"type\\":\\"mrkdwn\\",\\"text\\":\\"<https://vulnfeed.it/patch-now.html|View full patch list>\\"}} }}
+  ]
+}}"
+"""
+
+    curl_examples = f"""# Count critical CVEs
+curl -s {_JSON_API} | jq '[.[] | select(.severity=="CRITICAL")] | length'
+
+# List actively exploited CVEs with scores
+curl -s {_JSON_API} | jq -r '.[] | select(.badge=="ACTIVELY EXPLOITED") | [.id,.severity,(.score|tostring),.title[:60]] | @tsv'
+
+# Top 10 by EPSS percentile
+curl -s {_JSON_API} | jq -r '[.[] | select(.epss_pct != null)] | sort_by(-.epss_pct) | .[:10][] | "\\(.epss_pct)%ile  \\(.id)  \\(.title[:60])"'
+
+# CVEs with public PoC and score >= 9
+curl -s {_JSON_API} | jq '[.[] | select(.poc==true and (.score // 0) >= 9)]'
+
+# Filter by product keyword
+curl -s {_JSON_API} | jq '[.[] | select(.title | ascii_downcase | contains("nginx"))]'
+
+# Export to CSV
+curl -s {_JSON_API} | jq -r '["id","severity","score","epss_pct","title"],(.[] | [.id,.severity,(.score|tostring),(.epss_pct|tostring),.title[:80]]) | @csv' > vulns.csv"""
+
+    python_example = f"""import json, urllib.request
+
+with urllib.request.urlopen("{_JSON_API}") as r:
+    vulns = json.load(r)
+
+# Critical + actively exploited
+urgent = [
+    v for v in vulns
+    if v.get("severity") == "CRITICAL"
+    and v.get("badge") == "ACTIVELY EXPLOITED"
+]
+
+for v in sorted(urgent, key=lambda x: -(x.get("score") or 0)):
+    print(f"{{v['id']}} ({{v['score']}}) — {{v['title'][:80]}}")
+"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f172a">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>Grafana, Prometheus &amp; Slack Integration — vulnfeed CVE API | vulnfeed</title>
+<meta name="description" content="Integrate vulnfeed's CVE JSON API with Grafana (Infinity plugin), Prometheus node_exporter textfile, and Slack webhooks. Copy-paste scripts for security monitoring dashboards.">
+<link rel="canonical" href="{base_url}/grafana.html">
+<style>
+{_PAGE_CSS}
+pre{{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:1.1rem 1.25rem;font-size:.75rem;line-height:1.65;overflow-x:auto;margin:.75rem 0;border:1px solid #1e293b;font-family:ui-monospace,"Cascadia Code","Fira Code",monospace}}
+.copy-btn{{float:right;background:#334155;color:#94a3b8;border:none;border-radius:4px;padding:.2rem .6rem;font-size:.68rem;cursor:pointer;font-family:inherit;margin-top:-.15rem}}
+.copy-btn:hover{{background:#475569;color:#f1f5f9}}
+.copy-btn.copied{{background:#16a34a;color:#fff}}
+.section{{margin:2.5rem 0 0}}
+.card{{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem 1.5rem;margin:.75rem 0}}
+.card h3{{font-size:.88rem;font-weight:700;margin-bottom:.4rem;display:flex;align-items:center;gap:.5rem}}
+.card p{{font-size:.8rem;color:var(--muted);margin-bottom:.75rem;line-height:1.6}}
+.tag{{display:inline-block;background:#334155;color:#94a3b8;border-radius:4px;padding:.1rem .4rem;font-size:.63rem;font-weight:600}}
+.tag-green{{background:#14532d;color:#86efac}}.tag-blue{{background:#1e3a8a;color:#93c5fd}}.tag-purple{{background:#4c1d95;color:#c4b5fd}}
+.field-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;margin:.75rem 0}}
+.field-box{{background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:.6rem .85rem;font-size:.75rem}}
+.field-box code{{font-family:ui-monospace,monospace;color:#2563eb;font-weight:700}}
+.field-box .fdesc{{color:var(--muted);margin-top:.15rem;font-size:.71rem}}
+.steps{{list-style:none;counter-reset:step;display:grid;gap:.5rem;margin:.75rem 0}}
+.steps li{{counter-increment:step;display:flex;gap:.75rem;align-items:flex-start;font-size:.8rem;line-height:1.6}}
+.steps li::before{{content:counter(step);background:var(--accent);color:#fff;border-radius:50%;width:1.3rem;height:1.3rem;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;flex-shrink:0;margin-top:.1rem}}
+</style>
+</head>
+<body>
+<header style="background:#0f172a;color:#f1f5f9;padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem">
+  <div><div class="logo" style="font-size:1.25rem;font-weight:700;letter-spacing:-.02em">vuln<em style="color:#60a5fa;font-style:normal">feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">&#8592; Back to feed</a>
+    <a class="hlink" href="/api.html">API docs</a>
+    <a class="hlink" href="/patch-now.html">Patch now</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1>Grafana, Prometheus &amp; Slack Integration</h1>
+  <p class="sub">Bring vulnfeed CVE data into your monitoring stack. The <a href="{_JSON_API}" style="color:var(--accent)">/vulns.json</a> API is open, no auth required.</p>
+
+  <div class="field-grid" style="margin-bottom:2rem">
+    <div class="field-box"><code>{_JSON_API}</code><div class="fdesc">JSON endpoint — no auth, CORS open, updated every 4h</div></div>
+    <div class="field-box"><code>{base_url}/feed.xml</code><div class="fdesc">RSS 2.0 feed — subscribe in any reader</div></div>
+    <div class="field-box"><code>{base_url}/badge/critical-count.svg</code><div class="fdesc">SVG badge — embed in README or docs</div></div>
+  </div>
+
+  <!-- Grafana -->
+  <div class="section">
+    <h2>&#128202; Grafana via Infinity Plugin</h2>
+    <div class="card">
+      <h3><span class="tag tag-blue">Step-by-step</span> Connect vulnfeed to Grafana</h3>
+      <p>The <a href="https://grafana.com/grafana/plugins/yesoreyeram-infinity-datasource/" style="color:var(--accent)">Infinity data source plugin</a> can query any JSON URL directly — no backend needed.</p>
+      <ol class="steps">
+        <li>In Grafana: <strong>Connections → Add data source → search "Infinity"</strong> and install if not already present.</li>
+        <li>Add a new Infinity data source — no configuration needed (leave URL blank, we set it per-panel).</li>
+        <li>Create a new Dashboard. For each panel, set data source to <strong>Infinity</strong>, type = <strong>JSON</strong>, source = <strong>URL</strong>, URL = <code style="font-family:monospace;font-size:.75rem">{_JSON_API}</code>.</li>
+        <li>Add column selectors: <code style="font-family:monospace;font-size:.75rem">id</code>, <code style="font-family:monospace;font-size:.75rem">severity</code>, <code style="font-family:monospace;font-size:.75rem">score</code>, <code style="font-family:monospace;font-size:.75rem">epss_pct</code>, <code style="font-family:monospace;font-size:.75rem">title</code>, <code style="font-family:monospace;font-size:.75rem">published</code>.</li>
+        <li>Use <strong>Transformations → Filter by value</strong> to filter by severity, or <strong>Sort by</strong> EPSS percentile.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-blue">Dashboard JSON</span> Paste-ready panel config</h3>
+      <p>In Grafana, use <strong>Dashboard settings → JSON model</strong> to paste this starter config (replace with your Infinity datasource UID).</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{dashboard_json}</pre>
+    </div>
+  </div>
+
+  <!-- Prometheus -->
+  <div class="section">
+    <h2>&#128200; Prometheus / node_exporter textfile</h2>
+    <div class="card">
+      <h3><span class="tag tag-green">Shell script</span> Textfile collector exporter</h3>
+      <p>Run this script via cron every 15 minutes. It writes a <code>.prom</code> file that node_exporter's textfile collector picks up automatically. Then alert on <code>vulnfeed_kev_total &gt; 0</code> or build panels in Grafana from Prometheus.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{prom_script}</pre>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-green">Prometheus rules</span> Example alerting rules</h3>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>groups:
+  - name: vulnfeed
+    rules:
+      - alert: NewKEVVulnerabilities
+        expr: vulnfeed_kev_total &gt; 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{{{ $value }}}} CVEs are actively exploited (CISA KEV)"
+          runbook: "https://vulnfeed.it/patch-now.html"
+
+      - alert: CriticalCVESpike
+        expr: vulnfeed_cves_by_severity{{{{severity="CRITICAL"}}}} &gt; 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{{{ $value }}}} critical CVEs tracked — review patch list"
+          runbook: "https://vulnfeed.it/patch-now.html"</pre>
+    </div>
+  </div>
+
+  <!-- Slack -->
+  <div class="section">
+    <h2>&#128172; Slack / PagerDuty webhook</h2>
+    <div class="card">
+      <h3><span class="tag tag-purple">Shell script</span> Slack alert for KEV CVEs</h3>
+      <p>Post a Slack message every 4 hours listing the top actively exploited CVEs. Set your <code>SLACK_WEBHOOK</code> from <strong>Slack → Apps → Incoming Webhooks</strong>.</p>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{slack_script}</pre>
+    </div>
+  </div>
+
+  <!-- curl / jq -->
+  <div class="section">
+    <h2>&#128196; curl &amp; jq recipes</h2>
+    <div class="card">
+      <h3><span class="tag">Shell</span> One-liners for the terminal</h3>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{curl_examples}</pre>
+    </div>
+  </div>
+
+  <!-- Python -->
+  <div class="section">
+    <h2>&#128013; Python</h2>
+    <div class="card">
+      <h3><span class="tag">Python 3</span> Query the API — stdlib only</h3>
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <pre>{python_example}</pre>
+    </div>
+  </div>
+
+  <!-- Data fields -->
+  <div class="section">
+    <h2>&#128196; Available fields in vulns.json</h2>
+    <div class="field-grid">
+      <div class="field-box"><code>id</code><div class="fdesc">CVE ID or advisory ID</div></div>
+      <div class="field-box"><code>title</code><div class="fdesc">Short description</div></div>
+      <div class="field-box"><code>severity</code><div class="fdesc">CRITICAL / HIGH / MEDIUM / LOW / UNKNOWN</div></div>
+      <div class="field-box"><code>score</code><div class="fdesc">CVSS v3 base score (0–10)</div></div>
+      <div class="field-box"><code>epss</code><div class="fdesc">EPSS probability (0–1)</div></div>
+      <div class="field-box"><code>epss_pct</code><div class="fdesc">EPSS percentile (0–100)</div></div>
+      <div class="field-box"><code>badge</code><div class="fdesc">"ACTIVELY EXPLOITED" if on CISA KEV</div></div>
+      <div class="field-box"><code>poc</code><div class="fdesc">true if public exploit code exists</div></div>
+      <div class="field-box"><code>source</code><div class="fdesc">NVD / CISA KEV / Ubuntu / Debian / …</div></div>
+      <div class="field-box"><code>published</code><div class="fdesc">ISO 8601 publication date</div></div>
+      <div class="field-box"><code>references</code><div class="fdesc">Array of advisory/patch URLs</div></div>
+      <div class="field-box"><code>affected</code><div class="fdesc">Array of affected products</div></div>
+      <div class="field-box"><code>url</code><div class="fdesc">Canonical source URL</div></div>
+    </div>
+    <p style="margin-top:1rem;font-size:.75rem;color:var(--muted)">Full schema: <a href="/api.html" style="color:var(--accent)">API documentation</a></p>
+  </div>
+</div>
+<script>
+function copyCode(btn) {{
+  const pre = btn.nextElementSibling;
+  navigator.clipboard.writeText(pre.textContent).then(() => {{
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1800);
+  }});
+}}
+</script>
+</body>
+</html>"""
+
+    with open("grafana.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log("  Written: grafana.html")
+
+
+# ---------------------------------------------------------------------------
 # Badge SVGs
 # ---------------------------------------------------------------------------
 
@@ -5614,9 +6199,12 @@ def main():
     log("Writing stats page...")
     write_stats_page(vulns, date_str)
     write_trending_page(vulns, date_str)
+    write_patch_now_page(vulns, date_str)
+    write_zero_days_page(vulns, date_str)
     write_search_page(vulns)
     write_how_to_scan_page()
     write_api_docs_page()
+    write_grafana_page()
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
     log("Writing CWE pages...")

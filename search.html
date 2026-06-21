@@ -64,7 +64,7 @@ header{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;
   <h1>Advanced Search</h1>
   <form id="sf" autocomplete="off">
     <div class="sf-row">
-      <div class="sf-field wide"><label>Keyword / CVE ID</label>
+      <div class="sf-field wide"><label>Keyword / CVE ID &mdash; <span style="font-weight:400;text-transform:none;letter-spacing:0">results update as you type, all fields optional</span></label>
         <input type="text" id="sf-q" placeholder='e.g. openstack, CVE-2024-1234, nginx'></div>
       <div class="sf-field"><label>Source</label>
         <select id="sf-src"><option value="">All sources</option><option value="Arista">Arista</option>
@@ -255,6 +255,17 @@ header{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;
     a.download="vulnfeed-search.csv";
     a.click();
   }
+
+  // Live search — debounced on any field change
+  let _t=null;
+  function _debounce(){clearTimeout(_t);_t=setTimeout(runSearch,220);}
+  document.getElementById("sf-q").addEventListener("input",_debounce);
+  document.getElementById("sf-src").addEventListener("change",_debounce);
+  document.querySelectorAll('[name=sev],#sf-kev,#sf-new').forEach(el=>el.addEventListener("change",_debounce));
+  document.getElementById("sf-score").addEventListener("input",_debounce);
+  document.getElementById("sf-epss").addEventListener("input",_debounce);
+  document.getElementById("sf-from").addEventListener("change",_debounce);
+  document.getElementById("sf-to").addEventListener("change",_debounce);
 
   // Wire up
   document.getElementById("sf").addEventListener("submit",function(e){e.preventDefault();runSearch();});

@@ -1791,6 +1791,7 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
     entries = [url_entry(f"{base_url}/", "hourly", "1.0")]
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
+    entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
     entries.append(url_entry(f"{base_url}/digest/", "daily", "0.6"))
     for vp in (vendor_pages or []):
         entries.append(url_entry(f"{base_url}/vendor/{vp['slug']}.html", "daily", "0.7"))
@@ -2074,6 +2075,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
       <a class="hlink" href="/stats.html">Stats</a>
       <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
+      <a class="hlink" href="/how-to-scan.html">&#128737;&nbsp;How to scan</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
     </div>
@@ -3342,7 +3344,7 @@ header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex
   <h1>Advanced Search</h1>
   <form id="sf" autocomplete="off">
     <div class="sf-row">
-      <div class="sf-field wide"><label>Keyword / CVE ID</label>
+      <div class="sf-field wide"><label>Keyword / CVE ID &mdash; <span style="font-weight:400;text-transform:none;letter-spacing:0">results update as you type, all fields optional</span></label>
         <input type="text" id="sf-q" placeholder='e.g. openstack, CVE-2024-1234, nginx'></div>
       <div class="sf-field"><label>Source</label>
         <select id="sf-src"><option value="">All sources</option>{src_opts}</select></div>
@@ -3520,6 +3522,17 @@ header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex
     a.click();
   }}
 
+  // Live search — debounced on any field change
+  let _t=null;
+  function _debounce(){{clearTimeout(_t);_t=setTimeout(runSearch,220);}}
+  document.getElementById("sf-q").addEventListener("input",_debounce);
+  document.getElementById("sf-src").addEventListener("change",_debounce);
+  document.querySelectorAll('[name=sev],#sf-kev,#sf-new').forEach(el=>el.addEventListener("change",_debounce));
+  document.getElementById("sf-score").addEventListener("input",_debounce);
+  document.getElementById("sf-epss").addEventListener("input",_debounce);
+  document.getElementById("sf-from").addEventListener("change",_debounce);
+  document.getElementById("sf-to").addEventListener("change",_debounce);
+
   // Wire up
   document.getElementById("sf").addEventListener("submit",function(e){{e.preventDefault();runSearch();}});
   document.getElementById("sf-clear").addEventListener("click",function(){{
@@ -3555,6 +3568,234 @@ header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex
     with open("search.html", "w", encoding="utf-8") as fh:
         fh.write(html)
     log("  Written: search.html")
+
+
+def write_how_to_scan_page(base_url=BASE_URL):
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>if(location.protocol!=="https:"&&location.hostname!=="localhost")location.replace("https:"+location.href.slice(location.protocol.length));</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-CYF84YFT20"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag('js',new Date());gtag('config','G-CYF84YFT20');</script>
+<title>How to scan for CVEs &mdash; vulnfeed</title>
+<meta name="description" content="Practical guide to scanning your infrastructure for known CVEs using Nuclei, Trivy, Grype, and OpenVAS.">
+<link rel="canonical" href="{base_url}/how-to-scan.html">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}}
+header{{background:var(--hdr);color:var(--htxt);padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}}
+.logo{{font-size:1.2rem;font-weight:800;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
+.hlink{{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}}
+.hlink:hover{{border-color:#60a5fa;background:rgba(96,165,250,.08)}}
+.wrap{{max-width:800px;margin:0 auto;padding:2.5rem 1.5rem}}
+h1{{font-size:1.7rem;font-weight:800;letter-spacing:-.03em;margin-bottom:.4rem}}
+.subtitle{{font-size:.95rem;color:var(--muted);margin-bottom:2.5rem}}
+h2{{font-size:1.05rem;font-weight:700;margin:2rem 0 .6rem;padding-top:2rem;border-top:1px solid var(--border)}}
+h2:first-of-type{{border-top:none;padding-top:0}}
+h3{{font-size:.9rem;font-weight:700;margin:1.2rem 0 .35rem;color:#334155}}
+p{{font-size:.88rem;margin-bottom:.75rem}}
+ul,ol{{font-size:.88rem;padding-left:1.4rem;margin-bottom:.75rem}}
+li{{margin-bottom:.3rem}}
+code{{font-family:ui-monospace,monospace;font-size:.8rem;background:#f1f5f9;border:1px solid var(--border);padding:.1rem .35rem;border-radius:4px}}
+pre{{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:1.1rem 1.3rem;overflow-x:auto;margin:.6rem 0 1rem;font-size:.8rem;line-height:1.6}}
+pre code{{background:none;border:none;padding:0;color:inherit;font-size:inherit}}
+.tool-card{{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem 1.4rem;margin-bottom:1rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}}
+.tool-header{{display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem}}
+.tool-name{{font-size:.95rem;font-weight:700}}
+.tool-tag{{font-size:.65rem;font-weight:700;padding:.08rem .4rem;border-radius:3px;background:#e0f2fe;color:#0369a1;text-transform:uppercase}}
+.tool-tag.red{{background:#fee2e2;color:#dc2626}}
+.tool-tag.green{{background:#dcfce7;color:#16a34a}}
+.tool-tag.purple{{background:#f3e8ff;color:#7c3aed}}
+.tip{{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:.85rem 1rem;font-size:.83rem;margin:1rem 0;color:#1e3a8a;line-height:1.6}}
+.tip strong{{font-weight:700}}
+a{{color:var(--accent);text-decoration:none}}
+a:hover{{text-decoration:underline}}
+@media(max-width:600px){{.wrap{{padding:1.5rem 1rem}}h1{{font-size:1.3rem}}}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">vuln<em>feed</em></div>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <a class="hlink" href="/">&#8592; Feed</a>
+    <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
+    <a class="hlink" href="/stats.html">Stats</a>
+  </div>
+</header>
+<div class="wrap">
+
+<h1>How to scan your infrastructure for CVEs</h1>
+<p class="subtitle">A practical guide to finding known vulnerabilities in your endpoints, containers, and packages — using free, open-source tools.</p>
+
+<h2>1. Scan web endpoints with Nuclei</h2>
+<p><a href="https://github.com/projectdiscovery/nuclei" target="_blank" rel="noopener">Nuclei</a> is the fastest way to check if a target is vulnerable to a specific CVE. It uses community-maintained templates — many are added within hours of a disclosure.</p>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">Nuclei</span>
+    <span class="tool-tag green">Free</span>
+    <span class="tool-tag">Web &amp; API</span>
+    <span class="tool-tag purple">Network</span>
+  </div>
+  <p>Install:</p>
+  <pre><code>go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+# or via brew:
+brew install nuclei</code></pre>
+  <p>Scan a host for all CVE templates:</p>
+  <pre><code>nuclei -u https://your-target.com -tags cve -o results.txt</code></pre>
+  <p>Scan for a specific CVE (e.g. after spotting it on vulnfeed):</p>
+  <pre><code>nuclei -u https://your-target.com -id CVE-2024-1234</code></pre>
+  <p>Scan a list of hosts, only critical/high severity:</p>
+  <pre><code>nuclei -list hosts.txt -tags cve -severity critical,high -o cve-results.json -jsonl</code></pre>
+  <p>Update templates to get the latest CVE checks:</p>
+  <pre><code>nuclei -update-templates</code></pre>
+</div>
+
+<div class="tip"><strong>Tip:</strong> When you see a new CVE on vulnfeed, check the <a href="https://github.com/projectdiscovery/nuclei-templates/tree/main/http/cves" target="_blank" rel="noopener">nuclei-templates CVE directory</a> — search by CVE ID to see if a template exists. If it does, you can test your exposure immediately.</div>
+
+<h2>2. Scan containers and filesystems with Trivy</h2>
+<p><a href="https://github.com/aquasecurity/trivy" target="_blank" rel="noopener">Trivy</a> scans container images, filesystems, and code repos for known CVEs in installed packages. Essential for any team running Docker or Kubernetes.</p>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">Trivy</span>
+    <span class="tool-tag green">Free</span>
+    <span class="tool-tag">Containers</span>
+    <span class="tool-tag">Packages</span>
+  </div>
+  <p>Install:</p>
+  <pre><code>brew install aquasecurity/trivy/trivy
+# or via apt:
+apt install trivy</code></pre>
+  <p>Scan a Docker image:</p>
+  <pre><code>trivy image nginx:latest
+trivy image --severity CRITICAL,HIGH your-app:latest</code></pre>
+  <p>Scan the local filesystem (e.g. a Python/Node project):</p>
+  <pre><code>trivy fs .
+trivy fs --severity CRITICAL /path/to/project</code></pre>
+  <p>Scan a running Kubernetes cluster:</p>
+  <pre><code>trivy k8s --report summary cluster</code></pre>
+  <p>Output as JSON for ingestion into other tools:</p>
+  <pre><code>trivy image -f json -o results.json nginx:latest</code></pre>
+</div>
+
+<h2>3. Scan installed packages with Grype</h2>
+<p><a href="https://github.com/anchore/grype" target="_blank" rel="noopener">Grype</a> is a fast vulnerability scanner for container images and filesystems. Pairs well with Trivy as a second opinion.</p>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">Grype</span>
+    <span class="tool-tag green">Free</span>
+    <span class="tool-tag">Containers</span>
+    <span class="tool-tag">OS packages</span>
+  </div>
+  <pre><code>curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+grype your-image:latest
+grype dir:/path/to/project
+grype sbom:/path/to/sbom.json       # scan from an SBOM
+grype your-image:latest -o json | jq '.matches[] | select(.vulnerability.severity=="Critical")'</code></pre>
+</div>
+
+<h2>4. Scan network services with OpenVAS / Greenbone</h2>
+<p><a href="https://www.greenbone.net/en/community-edition/" target="_blank" rel="noopener">Greenbone Community Edition</a> (formerly OpenVAS) is a full network vulnerability scanner. Heavier to set up but covers network-level CVEs that web-only scanners miss.</p>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">Greenbone / OpenVAS</span>
+    <span class="tool-tag green">Free</span>
+    <span class="tool-tag red">Network scan</span>
+  </div>
+  <p>Quickest way to run it is via Docker:</p>
+  <pre><code>docker run -d -p 9392:9392 --name openvas greenbone/community-edition
+# Wait ~10 minutes for feeds to sync, then open:
+# https://localhost:9392  (admin / admin)</code></pre>
+  <p>Or install on Debian/Ubuntu:</p>
+  <pre><code>sudo apt install gvm
+sudo gvm-setup
+sudo gvm-start
+# Open https://localhost:9392</code></pre>
+</div>
+
+<div class="tip"><strong>Warning:</strong> Network scanners send real exploit probes. Only scan infrastructure you own or have written permission to test. Running these against third-party services without authorization is illegal.</div>
+
+<h2>5. Check specific CVEs against your OS packages</h2>
+<p>If you know a CVE from vulnfeed and want to quickly check if your system is affected:</p>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">Debian / Ubuntu</span>
+    <span class="tool-tag green">Built-in</span>
+  </div>
+  <pre><code># Check if a package version is affected
+apt-cache policy &lt;package-name&gt;
+
+# Full security audit with debsecan
+sudo apt install debsecan
+debsecan --suite $(lsb_release -cs) --format detail | grep CVE-2024-1234
+
+# Or use unattended-upgrades to auto-apply security patches:
+sudo unattended-upgrade --dry-run -d</code></pre>
+</div>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">RHEL / CentOS / Rocky / AlmaLinux</span>
+    <span class="tool-tag green">Built-in</span>
+  </div>
+  <pre><code># Check for a specific CVE
+dnf updateinfo list --cve CVE-2024-1234
+
+# List all available security updates
+dnf updateinfo list security
+
+# Apply security updates only
+sudo dnf upgrade --security</code></pre>
+</div>
+
+<h2>6. Automate: daily CVE checks in CI</h2>
+<p>Add CVE scanning to your CI pipeline so every image build is checked before deployment:</p>
+
+<div class="tool-card">
+  <div class="tool-header">
+    <span class="tool-name">GitHub Actions example</span>
+    <span class="tool-tag purple">CI/CD</span>
+  </div>
+  <pre><code>name: CVE Scan
+on: [push]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t myapp:${{{{ github.sha }}}} .
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: myapp:${{{{ github.sha }}}}
+          severity: CRITICAL,HIGH
+          exit-code: 1        # fail the build if found</code></pre>
+</div>
+
+<h2>Recommended workflow</h2>
+<ol>
+  <li>Subscribe to <a href="/">vulnfeed weekly digest</a> to get notified of new critical CVEs.</li>
+  <li>When you see a relevant CVE, check if a <a href="https://github.com/projectdiscovery/nuclei-templates" target="_blank" rel="noopener">Nuclei template</a> exists and run it against your endpoints.</li>
+  <li>Run <code>trivy image</code> on every container build in CI — fail on CRITICAL.</li>
+  <li>Run a weekly <code>nuclei -tags cve -severity critical,high</code> sweep against your public-facing services.</li>
+  <li>Subscribe to your distro's security mailing list (Ubuntu USN, Debian DSA, RHEL RHSA) for OS-level patches.</li>
+</ol>
+
+</div>
+</body>
+</html>"""
+    with open("how-to-scan.html", "w", encoding="utf-8") as fh:
+        fh.write(html)
+    log("  Written: how-to-scan.html")
 
 
 def _build_heatmap_html():
@@ -4485,6 +4726,7 @@ def main():
     log("Writing stats page...")
     write_stats_page(vulns, date_str)
     write_search_page(vulns)
+    write_how_to_scan_page()
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
     log("Writing CWE pages...")

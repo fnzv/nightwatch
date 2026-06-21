@@ -1875,7 +1875,8 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
 
 
 def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
-                  cwe_pages=None, digest_dates=None, weekly_digest_weeks=None):
+                  cwe_pages=None, digest_dates=None, weekly_digest_weeks=None,
+                  monthly_archive_months=None):
     def url_entry(loc, freq, pri, lastmod=None):
         lm = lastmod or date_str
         return (
@@ -1892,6 +1893,9 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
     entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
     entries.append(url_entry(f"{base_url}/api.html", "monthly", "0.5"))
     entries.append(url_entry(f"{base_url}/digest/", "daily", "0.6"))
+    entries.append(url_entry(f"{base_url}/archive/", "monthly", "0.5"))
+    for ym in (monthly_archive_months or []):
+        entries.append(url_entry(f"{base_url}/archive/{ym}.html", "monthly", "0.5"))
     for vp in (vendor_pages or []):
         entries.append(url_entry(f"{base_url}/vendor/{vp['slug']}.html", "daily", "0.7"))
     for cp in (cwe_pages or []):
@@ -2023,6 +2027,9 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 .cid{font-family:ui-monospace,"Cascadia Code",monospace;font-size:.78rem;font-weight:700;
   color:var(--accent);text-decoration:none}
 .cid:hover{text-decoration:underline}
+.review-btn{background:none;border:none;padding:.15rem .25rem;cursor:pointer;color:#cbd5e1;font-size:.78rem;line-height:1;border-radius:3px;opacity:0;transition:opacity .15s}
+.card:hover .review-btn{opacity:1}
+.review-btn:hover{color:#ef4444!important;background:#fee2e2}
 .share-btn{background:none;border:none;padding:.15rem .2rem;cursor:pointer;
   color:#94a3b8;border-radius:3px;display:inline-flex;align-items:center;
   transition:color .12s,background .12s;vertical-align:middle;flex-shrink:0}
@@ -2189,6 +2196,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <a class="hlink" href="/trending.html">&#128200;&nbsp;Trending</a>
       <a class="hlink" href="/stats.html">Stats</a>
       <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
+      <a class="hlink" href="/archive/">Archive</a>
       <a class="hlink" href="/how-to-scan.html">&#128737;&nbsp;How to scan</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/api.html">API</a>
@@ -2200,6 +2208,13 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
   </div>
 </header>
 <div id="hist-banner"></div>
+<div id="new-since-banner" style="display:none;background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:.55rem 2rem;font-size:.81rem;color:#1e3a8a;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+  <span id="new-since-text"></span>
+  <div style="display:flex;gap:.75rem;align-items:center">
+    <button onclick="document.getElementById('new-since-banner').style.display='none'" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:.8rem;padding:0">Dismiss</button>
+    <button onclick="_clearReviewed()" id="clear-reviewed-btn" style="display:none;background:none;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;color:#1e3a8a;font-size:.78rem;padding:.1rem .5rem">Clear reviewed</button>
+  </div>
+</div>
 __VENDOR_INDEX_HTML__
 __CWE_INDEX_HTML__
 <div id="wl-panel">
@@ -2295,6 +2310,21 @@ function _toTS(s){if(!s)return 0;var d=new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(s)?s
 NEWS.forEach(n=>{n._ts=_toTS(n.published)});
 
 const _lastVisit=parseInt(localStorage.getItem("vf_lastVisit")||"0");
+const _reviewed=new Set(JSON.parse(localStorage.getItem("vf_reviewed")||"[]"));
+function _saveReviewed(){localStorage.setItem("vf_reviewed",JSON.stringify([..._reviewed].slice(-3000)));}
+function _markReviewed(id,cardEl){
+  _reviewed.add(id);_saveReviewed();
+  cardEl.style.transition="opacity .2s,transform .2s";
+  cardEl.style.opacity="0";cardEl.style.transform="translateX(10px)";
+  setTimeout(()=>{cardEl.remove();_syncReviewedBtn();},220);
+}
+function _syncReviewedBtn(){
+  const btn=document.getElementById("clear-reviewed-btn");
+  if(btn)btn.style.display=_reviewed.size>0?"":"none";
+}
+function _clearReviewed(){
+  _reviewed.clear();_saveReviewed();_syncReviewedBtn();location.reload();
+}
 const SEV=v=>v.severity||"UNKNOWN";
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function host(u){try{return new URL(u).hostname}catch(_){return String(u).slice(0,30)}}
@@ -2416,6 +2446,7 @@ function isWatched(v){
   return watchlist.some(kw=>hay.includes(kw));
 }
 function card(v){
+  if(_reviewed.has(v.id))return"";
   const sc=v.score!=null?`<span class="b bsc">${v.score.toFixed(1)}</span>`:"";
   const sv=`<span class="b b${SEV(v)}">${SEV(v)}</span>`;
   const sr=`<span class="b bsrc">${esc(v.source)}</span>`;
@@ -2437,7 +2468,8 @@ function card(v){
   const shareBtn=`<button class="share-btn" title="Copy link" onclick="event.stopPropagation();copyLink(this,'${sharePath}')" aria-label="Copy link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>`;
   const discussBtn=hasCvePage(v)?`<a class="share-btn" href="/cve/${v.id}.html#giscus-frame" title="Discuss" onclick="event.stopPropagation()" aria-label="Open discussion"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></a>`:"";
   const watchedCls=isWatched(v)?" watched":"";
-  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}${discussBtn}</div><div class="bdgs">${wl}${ur}${nw}${tr}${pc}${sc}${sv}${sr}${ep}${xp}${pt}</div></div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${fixHtml}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
+  const reviewBtn=`<button class="review-btn" title="Mark as reviewed" onclick="event.stopPropagation();_markReviewed('${esc(v.id)}',this.closest('.card'))" aria-label="Mark as reviewed">✕</button>`;
+  return `<div class="card${watchedCls}" data-sev="${SEV(v)}" onclick="this.classList.toggle('expanded')"><div class="ctop"><div style="display:flex;align-items:center;gap:.3rem"><a class="cid" href="${esc(v.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(v.id)}</a>${shareBtn}${discussBtn}</div><div class="bdgs">${wl}${ur}${nw}${tr}${pc}${sc}${sv}${sr}${ep}${xp}${pt}</div>${reviewBtn}</div>${ttl}${dsc}${aff?`<div class="chips">${aff}</div>`:""}${fixHtml}${rfs?`<div class="refs">${rfs}</div>`:""}${dt}</div>`;
 }
 
 function newsItem(n){
@@ -2802,7 +2834,17 @@ document.getElementById("shareBtn").addEventListener("click",function(){
   }).then(function(data){
     data.forEach(function(v){D.push(v);});
     D.forEach(v=>{v._ts=_toTS(v.published)});
-    if(_lastVisit>0){D.forEach(v=>{if(v._ts&&v._ts>_lastVisit)v._unread=true;});}
+    if(_lastVisit>0){
+      const unreadCount=D.filter(v=>{if(v._ts&&v._ts>_lastVisit){v._unread=true;return true;}return false;}).length;
+      if(unreadCount>0){
+        const banner=document.getElementById("new-since-banner");
+        const txt=document.getElementById("new-since-text");
+        const ago=timeAgo(_lastVisit/1000);
+        if(txt)txt.innerHTML=`&#128197; <strong>${unreadCount} new vulnerabilities</strong> since your last visit ${ago}`;
+        if(banner)banner.style.display="flex";
+      }
+    }
+    _syncReviewedBtn();
     setTimeout(()=>localStorage.setItem("vf_lastVisit",String(Date.now())),2000);
     const _nNew=D.filter(v=>v._new).length;
     const _np=document.getElementById("newPill");
@@ -4780,6 +4822,8 @@ h2{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;
   <ul class="digest-list">__WEEKLY_LINKS__</ul>
   <h2>Daily digests</h2>
   <ul class="digest-list">__DIGEST_LINKS__</ul>
+  <h2>Monthly archive</h2>
+  <ul class="digest-list"><li><a href="/archive/"><span style="color:#2563eb;font-weight:700">Browse all months &rarr;</span><span>Monthly CVE summaries</span></a></li></ul>
 </div>
 </body>
 </html>
@@ -5026,6 +5070,191 @@ def _badge_svg(label, value, color):
     <text x="{lw + vw//2}" y="14" text-anchor="middle">{value}</text>
   </g>
 </svg>'''
+
+
+def write_monthly_archive_pages(hist_dates, date_str, base_url=BASE_URL):
+    """Generate /archive/YYYY-MM.html per month + /archive/index.html."""
+    os.makedirs("archive", exist_ok=True)
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+
+    # Group available dates by month
+    month_to_dates = {}
+    for d in sorted({date_str} | set(hist_dates)):
+        try:
+            ym = d[:7]  # YYYY-MM
+            month_to_dates.setdefault(ym, []).append(d)
+        except Exception:
+            continue
+
+    written = []
+    for ym, dates in sorted(month_to_dates.items(), reverse=True):
+        vulns_month = []
+        for d in dates:
+            if d == date_str:
+                continue
+            p = os.path.join(HISTORICAL_DIR, f"{d}.json")
+            if not os.path.exists(p):
+                continue
+            try:
+                with open(p, encoding="utf-8") as f:
+                    vulns_month.extend(json.load(f))
+            except Exception:
+                pass
+        if not vulns_month:
+            continue
+
+        seen, unique = set(), []
+        sev_counts = {}
+        exploited = 0
+        for v in vulns_month:
+            if v["id"] not in seen:
+                seen.add(v["id"])
+                unique.append(v)
+            s = v.get("severity", "UNKNOWN")
+            sev_counts[s] = sev_counts.get(s, 0) + 1
+            if v.get("badge") == "ACTIVELY EXPLOITED":
+                exploited += 1
+
+        top = sorted(unique, key=lambda v: (
+            SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4), -(v.get("score") or 0)))[:80]
+
+        rows = []
+        for v in top:
+            sev = v.get("severity", "UNKNOWN")
+            sc_str = f'{v["score"]:.1f}' if v.get("score") is not None else "—"
+            pub = _pub_ymd(v.get("published") or "")
+            ttl = _xe((v.get("title") or v["id"])[:120])
+            vid = _xe(v["id"])
+            href = f'/cve/{v["id"]}.html' if v["id"].startswith("CVE-") else _xe(v.get("url",""))
+            rows.append(
+                f'<tr><td><a class="cve-id" href="{href}">{vid}</a></td>'
+                f'<td class="ttl">{ttl}</td>'
+                f'<td><span class="sev s{sev}">{sev}</span></td>'
+                f'<td>{sc_str}</td>'
+                f'<td><span class="src-tag">{_xe(v.get("source","?"))}</span></td>'
+                f'<td>{pub}</td></tr>'
+            )
+
+        month_label = datetime.strptime(ym, "%Y-%m").strftime("%B %Y")
+        table = (
+            '<table><tr><th>CVE / ID</th><th>Title</th><th>Severity</th>'
+            '<th>CVSS</th><th>Source</th><th>Date</th></tr>'
+            + "".join(rows) + '</table>'
+        ) if rows else '<p style="color:#64748b">No data.</p>'
+
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<title>Security Vulnerabilities {month_label} | vulnfeed</title>
+<meta name="description" content="{len(unique)} vulnerabilities tracked in {month_label}: {sev_counts.get('CRITICAL',0)} critical, {sev_counts.get('HIGH',0)} high severity. Monthly CVE digest by vulnfeed.">
+<link rel="canonical" href="{base_url}/archive/{ym}.html">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9;--crit:#dc2626;--high:#ea580c;--med:#d97706;--low:#16a34a;--unk:#6b7280}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}}
+header{{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}}
+.logo{{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
+.hlink{{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}}
+.hlink:hover{{border-color:#60a5fa}}
+.wrap{{max-width:1100px;margin:0 auto;padding:2rem}}
+h1{{font-size:1.4rem;font-weight:800;margin-bottom:.25rem}}
+h2{{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:2rem 0 .75rem}}
+.stat-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem;margin-bottom:2rem}}
+.stat-box{{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem}}
+.stat-val{{font-size:1.8rem;font-weight:800;letter-spacing:-.04em}}
+.stat-lbl{{font-size:.72rem;color:var(--muted);margin-top:.1rem}}
+.crit-val{{color:var(--crit)}}.high-val{{color:var(--high)}}.expl-val{{color:#7c3aed}}
+table{{width:100%;border-collapse:collapse;font-size:.8rem;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}}
+th{{text-align:left;font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.55rem .75rem;border-bottom:2px solid var(--border);background:#f8fafc}}
+td{{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}}
+tr:last-child td{{border-bottom:none}}
+tr:hover td{{background:#f8fafc}}
+.cve-id{{font-family:ui-monospace,monospace;font-size:.77rem;font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}}
+.cve-id:hover{{text-decoration:underline}}
+.sev{{display:inline-block;padding:.08rem .35rem;border-radius:3px;font-size:.65rem;font-weight:700;color:#fff;text-transform:uppercase}}
+.sCRITICAL{{background:var(--crit)}}.sHIGH{{background:var(--high)}}.sMEDIUM{{background:var(--med)}}.sLOW{{background:var(--low)}}.sUNKNOWN{{background:var(--unk)}}
+.src-tag{{display:inline-block;background:#334155;color:#fff;padding:.06rem .35rem;border-radius:3px;font-size:.63rem;font-weight:600}}
+.ttl{{font-size:.78rem}}
+@media(max-width:640px){{.wrap{{padding:1rem}}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){{display:none}}}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">vuln<em>feed</em></div></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <a class="hlink" href="/">Live feed</a>
+    <a class="hlink" href="/archive/">All months</a>
+  </div>
+</header>
+<div class="wrap">
+  <h1>Security Vulnerabilities &mdash; {month_label}</h1>
+  <div class="stat-grid">
+    <div class="stat-box"><div class="stat-val">{len(unique)}</div><div class="stat-lbl">Total vulnerabilities</div></div>
+    <div class="stat-box"><div class="stat-val crit-val">{sev_counts.get('CRITICAL',0)}</div><div class="stat-lbl">Critical</div></div>
+    <div class="stat-box"><div class="stat-val high-val">{sev_counts.get('HIGH',0)}</div><div class="stat-lbl">High</div></div>
+    <div class="stat-box"><div class="stat-val expl-val">{exploited}</div><div class="stat-lbl">Actively exploited</div></div>
+  </div>
+  <h2>Top vulnerabilities</h2>
+  {table}
+</div>
+</body>
+</html>"""
+        with open(os.path.join("archive", f"{ym}.html"), "w", encoding="utf-8") as f:
+            f.write(html)
+        written.append(ym)
+
+    # Index page
+    links = "".join(
+        f'<li><a href="/archive/{ym}.html">'
+        f'<span>{datetime.strptime(ym,"%Y-%m").strftime("%B %Y")}</span>'
+        f'<span style="font-size:.72rem;color:#64748b;font-weight:400">monthly digest</span>'
+        f'</a></li>'
+        for ym in written
+    )
+    idx = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<title>Monthly Security Vulnerability Archive | vulnfeed</title>
+<meta name="description" content="Monthly archive of CVE digests from vulnfeed — all vulnerabilities by month.">
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#2563eb;--hdr:#0f172a;--htxt:#f1f5f9}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}}
+header{{background:var(--hdr);color:var(--htxt);padding:1.2rem 2rem;display:flex;align-items:center;justify-content:space-between}}
+.logo{{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}}.logo em{{color:#60a5fa;font-style:normal}}
+.hlink{{font-size:.71rem;color:#60a5fa;text-decoration:none;padding:.18rem .5rem;border:1px solid #334155;border-radius:4px;font-weight:600}}
+.wrap{{max-width:700px;margin:0 auto;padding:2rem}}
+h1{{font-size:1.35rem;font-weight:800;margin-bottom:.5rem}}
+.sub{{font-size:.8rem;color:#64748b;margin-bottom:2rem}}
+ul{{list-style:none;display:grid;gap:.5rem}}
+li a{{display:flex;align-items:center;justify-content:space-between;padding:.65rem 1rem;background:var(--card);border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:.85rem;transition:border-color .15s}}
+li a:hover{{border-color:var(--accent)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">vuln<em>feed</em></div>
+  <a class="hlink" href="/">&#8592; Live feed</a>
+</header>
+<div class="wrap">
+  <h1>Monthly Archive</h1>
+  <p class="sub">Security vulnerability digests by month, aggregated from NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes and more.</p>
+  <ul>{links}</ul>
+</div>
+</body>
+</html>"""
+    with open(os.path.join("archive", "index.html"), "w", encoding="utf-8") as f:
+        f.write(idx)
+    log(f"  Written: {len(written)} monthly archive pages → archive/")
+    return written
 
 
 def write_badges(vulns, date_str):
@@ -5397,9 +5626,12 @@ def main():
     log("Writing weekly digest pages...")
     weekly_weeks = write_weekly_digest_pages(hist_dates, date_str)
     write_digest_index(digest_dates, weekly_weeks)
+    log("Writing monthly archive pages...")
+    monthly_months = write_monthly_archive_pages(hist_dates, date_str)
     write_sitemap(cve_pages, date_str, vendor_pages=vendor_pages,
                   cwe_pages=cwe_pages, digest_dates=digest_dates,
-                  weekly_digest_weeks=weekly_weeks)
+                  weekly_digest_weeks=weekly_weeks,
+                  monthly_archive_months=monthly_months)
 
     # --- Static HTML for SEO pre-render ---
     critical_ids = {v["id"] for v in cve_pages}

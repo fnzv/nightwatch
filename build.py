@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 
 HISTORICAL_DIR = "historical"
@@ -1651,6 +1652,26 @@ ul.aff-list li{font-family:ui-monospace,monospace;font-size:.82rem;background:#f
 .explainer strong{color:#0369a1}
 .explainer .expl-kev{color:#6d28d9;font-weight:700}
 .explainer .expl-poc{color:#dc2626;font-weight:700}
+.deep-dive{margin-top:1.6rem}
+.tl{display:flex;flex-direction:column;gap:0;margin:.6rem 0 1.2rem;padding-left:.2rem}
+.tl-row{display:flex;gap:.85rem;align-items:flex-start;position:relative;padding-bottom:1rem}
+.tl-row:last-child{padding-bottom:0}
+.tl-row::before{content:"";position:absolute;left:.55rem;top:1.1rem;bottom:0;width:2px;background:#e2e8f0}
+.tl-row:last-child::before{display:none}
+.tl-dot{width:1.1rem;height:1.1rem;border-radius:50%;flex-shrink:0;margin-top:.15rem;border:2px solid #fff;box-shadow:0 0 0 2px currentColor;z-index:1}
+.tl-body strong{font-size:.82rem;font-weight:700;display:block}
+.tl-body span{font-size:.76rem;color:#64748b}
+.rem-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.55rem;margin:.6rem 0 1.2rem}
+.rem-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:.65rem .85rem}
+.rem-card .rem-lbl{font-size:.63rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#64748b;margin-bottom:.3rem}
+.rem-card a{font-size:.76rem;word-break:break-all;color:#2563eb;display:block;line-height:1.4}
+.rel-table{width:100%;border-collapse:collapse;font-size:.78rem;margin:.6rem 0}
+.rel-table th{text-align:left;font-size:.66rem;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.4rem .5rem;border-bottom:2px solid #e2e8f0}
+.rel-table td{padding:.4rem .5rem;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.rel-table tr:last-child td{border-bottom:none}
+.rel-table tr:hover td{background:#f8fafc}
+.rel-table .cve-link{font-family:ui-monospace,monospace;font-size:.74rem;font-weight:700;color:#2563eb;text-decoration:none;white-space:nowrap}
+.rel-table .cve-link:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -1672,6 +1693,7 @@ __CVE_REFS_HTML__
     Feed updated: <strong>__BUILD_DATE__</strong>
   </div>
   __CVE_EXPLAINER_HTML__
+__CVE_DEEP_DIVE_HTML__
   <div class="cta">
     <a href="__BASE_URL__/">vulnfeed</a> aggregates __TOTAL_COUNT__ vulnerabilities from NVD, CISA KEV,
     Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB, OSS-Security, GitHub and OpenStack &mdash; updated every 4 hours.
@@ -1763,6 +1785,121 @@ def _cve_explainer(v, pub_fmt):
     return '<div class="explainer">' + " ".join(parts) + "</div>"
 
 
+def _cve_deep_dive(v, related, pub_fmt, date_str):
+    """Extended deep-dive section for KEV or CVSS ≥9.0 CVEs."""
+    is_kev = v.get("badge") == "ACTIVELY EXPLOITED"
+    score  = v.get("score") or 0
+    if not is_kev and score < 9.0:
+        return ""
+
+    # --- Timeline ---
+    try:
+        pub_dt   = datetime.fromisoformat((v.get("published") or "").replace("Z", "+00:00"))
+        today_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        days_old = (today_dt - pub_dt.replace(tzinfo=None)).days
+        age_str  = f"{days_old} day{'s' if days_old != 1 else ''} ago"
+    except Exception:
+        age_str = ""
+
+    tl_items = [
+        ("#2563eb", "CVE Disclosed", f"{pub_fmt}{(' · ' + age_str) if age_str else ''}"),
+    ]
+    if v.get("poc"):
+        tl_items.append(("#dc2626", "Public PoC Exploit Available",
+                         "Weaponised proof-of-concept code is publicly accessible"))
+    if is_kev:
+        tl_items.append(("#7c3aed", "CISA KEV — Actively Exploited",
+                         "U.S. federal agencies required to patch · confirmed threat-actor activity"))
+
+    tl_rows = "".join(
+        f'<div class="tl-row">'
+        f'<div class="tl-dot" style="color:{c}"></div>'
+        f'<div class="tl-body"><strong>{label}</strong><span>{detail}</span></div>'
+        f'</div>'
+        for c, label, detail in tl_items
+    )
+    timeline_html = f'<div class="tl">{tl_rows}</div>'
+
+    # --- Remediation resources ---
+    refs = [r for r in (v.get("references") or []) if r]
+    NVD_HOSTS    = {"nvd.nist.gov", "cve.mitre.org"}
+    CISA_HOSTS   = {"cisa.gov", "us-cert.cisa.gov"}
+    GH_HOSTS     = {"github.com", "github.advisory-database"}
+    PATCH_WORDS  = {"advisory", "security", "bulletin", "patch", "fix", "update",
+                    "release", "alert", "vuln", "cve", "errata", "kb", "sa-"}
+
+    buckets = {"Official Advisory": [], "CISA / KEV": [], "GitHub": [], "NVD / MITRE": [], "Analysis & PoC": []}
+    for r in refs:
+        host = urlparse(r).netloc.lower().lstrip("www.")
+        path = r.lower()
+        if host in CISA_HOSTS:
+            buckets["CISA / KEV"].append(r)
+        elif host in NVD_HOSTS:
+            buckets["NVD / MITRE"].append(r)
+        elif host in GH_HOSTS:
+            buckets["GitHub"].append(r)
+        elif any(w in path for w in PATCH_WORDS):
+            buckets["Official Advisory"].append(r)
+        else:
+            buckets["Analysis & PoC"].append(r)
+
+    rem_cards = []
+    for lbl, urls in buckets.items():
+        for u in urls[:2]:
+            short = u.split("//", 1)[-1][:70]
+            rem_cards.append(
+                f'<div class="rem-card"><div class="rem-lbl">{lbl}</div>'
+                f'<a href="{_xe(u)}" target="_blank" rel="noopener noreferrer">{_xe(short)}</a></div>'
+            )
+    rem_html = f'<div class="rem-grid">{"".join(rem_cards)}</div>' if rem_cards else ""
+
+    # --- Related CVEs ---
+    rel_rows = []
+    for rv in related[:6]:
+        rs    = rv.get("severity", "UNKNOWN")
+        rsc   = f'{rv["score"]:.1f}' if rv.get("score") is not None else "—"
+        rtl   = _xe((rv.get("title") or rv["id"])[:80])
+        rid   = _xe(rv["id"])
+        rbadge = ' <span style="font-size:.6rem;background:#7c3aed;color:#fff;border-radius:2px;padding:.02rem .25rem;font-weight:700">KEV</span>' if rv.get("badge") == "ACTIVELY EXPLOITED" else ""
+        rpoc  = ' <span style="font-size:.6rem;background:#dc2626;color:#fff;border-radius:2px;padding:.02rem .25rem;font-weight:700">PoC</span>' if rv.get("poc") else ""
+        rel_rows.append(
+            f'<tr>'
+            f'<td><a class="cve-link" href="/cve/{rid}.html">{rid}</a>{rbadge}{rpoc}</td>'
+            f'<td>{rtl}</td>'
+            f'<td><span class="b b{rs}" style="font-size:.62rem;padding:.05rem .3rem">{rs}</span></td>'
+            f'<td style="font-family:ui-monospace,monospace;font-size:.74rem">{rsc}</td>'
+            f'</tr>'
+        )
+    rel_html = ""
+    if rel_rows:
+        rel_html = (
+            '<h2>Related Vulnerabilities</h2>'
+            '<table class="rel-table">'
+            '<tr><th>CVE</th><th>Title</th><th>Severity</th><th>CVSS</th></tr>'
+            + "".join(rel_rows) + '</table>'
+        )
+
+    sections = []
+    sections.append('<div class="deep-dive"><h2>Risk Timeline</h2>' + timeline_html)
+    if rem_html:
+        sections.append('<h2>Remediation Resources</h2>' + rem_html)
+    if rel_html:
+        sections.append(rel_html)
+    sections.append('</div>')
+    return "\n".join(sections)
+
+
+def _vendor_key(v):
+    """Extract a short vendor/product key from the first affected entry."""
+    aff = (v.get("affected") or [])
+    if not aff:
+        return None
+    first = aff[0].lower()
+    # "vendor/product ..." or "vendor product ..."
+    key = first.split("/")[0].split()[0].strip()
+    return key if len(key) >= 3 else None
+
+
 def write_cve_pages(vulns, date_str, base_url=BASE_URL):
     """Generate individual HTML pages for all proper CVE-YYYY-NNNNN entries."""
     candidates = [v for v in vulns if v["id"].startswith("CVE-")]
@@ -1771,6 +1908,16 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         if v["id"] not in seen:
             seen.add(v["id"])
             unique.append(v)
+
+    # Build vendor → sorted CVE list for related-CVE lookups
+    SEV_ORD = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    vendor_map: dict[str, list] = {}
+    for u in unique:
+        k = _vendor_key(u)
+        if k:
+            vendor_map.setdefault(k, []).append(u)
+    for k in vendor_map:
+        vendor_map[k].sort(key=lambda u: (SEV_ORD.get(u.get("severity","UNKNOWN"),4), -(u.get("score") or 0)))
 
     os.makedirs("cve", exist_ok=True)
     total = len(vulns)
@@ -1847,6 +1994,10 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         title_tag   = f"{cve_id} — {sev_label}{score_label} — {title_short} | vulnfeed"
         explainer   = _cve_explainer(v, pub_fmt)
 
+        vkey    = _vendor_key(v)
+        related = [u for u in vendor_map.get(vkey, []) if u["id"] != cve_id][:6] if vkey else []
+        deep    = _cve_deep_dive(v, related, pub_fmt, date_str)
+
         page = _CVE_PAGE_HTML
         page = page.replace("__CVE_TITLE_TAG__",      _xe(title_tag))
         page = page.replace("__CVE_META_DESC__",       meta_desc)
@@ -1866,6 +2017,7 @@ def write_cve_pages(vulns, date_str, base_url=BASE_URL):
         page = page.replace("__TOTAL_COUNT__",         str(total))
         page = page.replace("__BASE_URL__",            base_url)
         page = page.replace("__CVE_EXPLAINER_HTML__",  explainer)
+        page = page.replace("__CVE_DEEP_DIVE_HTML__",  deep)
 
         with open(os.path.join("cve", f"{cve_id}.html"), "w", encoding="utf-8") as f:
             f.write(page)
@@ -1890,6 +2042,7 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
     entries.append(url_entry(f"{base_url}/trending.html", "hourly", "0.8"))
     entries.append(url_entry(f"{base_url}/patch-now.html", "hourly", "0.9"))
     entries.append(url_entry(f"{base_url}/zero-days.html", "hourly", "0.9"))
+    entries.append(url_entry(f"{base_url}/new-this-week.html", "daily", "0.8"))
     entries.append(url_entry(f"{base_url}/grafana.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
@@ -2198,6 +2351,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <select id="datePicker" class="hsel"><option value="">Today (live)</option></select>
       <a class="hlink" href="/patch-now.html" style="border-color:#7c3aed;color:#a78bfa">&#128683;&nbsp;Patch now</a>
       <a class="hlink" href="/zero-days.html" style="border-color:#dc2626;color:#f87171">&#9888;&nbsp;0-days</a>
+      <a class="hlink" href="/new-this-week.html">&#128197;&nbsp;New this week</a>
       <a class="hlink" href="/trending.html">&#128200;&nbsp;Trending</a>
       <a class="hlink" href="/stats.html">Stats</a>
       <a class="hlink" href="/search.html">&#128269;&nbsp;Search</a>
@@ -5057,6 +5211,91 @@ tr:hover td{{background:var(--bg)}}
 
 
 # ---------------------------------------------------------------------------
+# New this week page
+# ---------------------------------------------------------------------------
+
+def write_new_this_week_page(vulns, date_str, base_url=BASE_URL):
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    try:
+        cutoff = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+    except Exception:
+        cutoff = ""
+
+    fresh = [
+        v for v in vulns
+        if (v.get("published") or "")[:10] >= cutoff
+    ]
+    fresh.sort(key=lambda v: (
+        SEV_ORDER.get(v.get("severity", "UNKNOWN"), 4),
+        -(v.get("epss_pct") or 0),
+        -(v.get("score") or 0),
+    ))
+
+    n_crit  = sum(1 for v in fresh if v.get("severity") == "CRITICAL")
+    n_kev   = sum(1 for v in fresh if v.get("badge") == "ACTIVELY EXPLOITED")
+    n_poc   = sum(1 for v in fresh if v.get("poc"))
+    n_high  = sum(1 for v in fresh if v.get("severity") == "HIGH")
+
+    def reason(v):
+        parts = []
+        if v.get("badge") == "ACTIVELY EXPLOITED":
+            parts.append('<span class="badge-kev">KEV</span>')
+        if v.get("poc"):
+            parts.append('<span class="badge-poc">PoC</span>')
+        if v.get("epss_pct") is not None:
+            parts.append(f'<span class="badge-epss">EPSS {v["epss_pct"]:.0f}%ile</span>')
+        return "&nbsp;".join(parts) if parts else "—"
+
+    rows = [_vuln_row(v, reason(v)) for v in fresh]
+    table = _vuln_table(rows)
+
+    head = _page_head(
+        f"New This Week — {len(fresh)} CVEs Published in the Last 7 Days | vulnfeed",
+        f"{len(fresh)} new vulnerabilities in the last 7 days: {n_crit} critical, {n_kev} actively exploited, {n_poc} with public exploit code. Updated every 4 hours.",
+        f"{base_url}/new-this-week.html",
+        date_str,
+    )
+
+    html = f"""{head}
+<body>
+{_page_header(extra_links='<a class="hlink" href="/patch-now.html">Patch now</a><a class="hlink" href="/zero-days.html">Zero-days</a>')}
+<div class="wrap">
+  <h1>&#128197; New This Week</h1>
+  <p class="sub">Vulnerabilities published in the last 7 days ({cutoff} &rarr; {date_str}). Updated every 4 hours.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;margin-bottom:1.75rem">
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:.9rem 1.1rem">
+      <div style="font-size:1.7rem;font-weight:800;letter-spacing:-.04em">{len(fresh)}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:.1rem">Total new CVEs</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:.9rem 1.1rem">
+      <div style="font-size:1.7rem;font-weight:800;color:#dc2626;letter-spacing:-.04em">{n_crit}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:.1rem">Critical</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:.9rem 1.1rem">
+      <div style="font-size:1.7rem;font-weight:800;color:#ea580c;letter-spacing:-.04em">{n_high}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:.1rem">High</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:.9rem 1.1rem">
+      <div style="font-size:1.7rem;font-weight:800;color:#7c3aed;letter-spacing:-.04em">{n_kev}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:.1rem">Actively exploited</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:.9rem 1.1rem">
+      <div style="font-size:1.7rem;font-weight:800;color:#dc2626;letter-spacing:-.04em">{n_poc}</div>
+      <div style="font-size:.72rem;color:#64748b;margin-top:.1rem">Public PoC</div>
+    </div>
+  </div>
+  {table}
+  <p style="margin-top:1.5rem;font-size:.75rem;color:#64748b">Updated {date_str}. Sources: NVD, CISA KEV, Ubuntu, Debian, Red Hat, Kubernetes, Exploit-DB and more. <a href="/api.html" style="color:#2563eb">JSON API</a> available for automation.</p>
+</div>
+</body>
+</html>"""
+
+    with open("new-this-week.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log(f"  Written: new-this-week.html ({len(fresh)} CVEs, {n_crit} critical, {n_kev} KEV)")
+
+
+# ---------------------------------------------------------------------------
 # Patch Now page
 # ---------------------------------------------------------------------------
 
@@ -6201,6 +6440,7 @@ def main():
     write_trending_page(vulns, date_str)
     write_patch_now_page(vulns, date_str)
     write_zero_days_page(vulns, date_str)
+    write_new_this_week_page(vulns, date_str)
     write_search_page(vulns)
     write_how_to_scan_page()
     write_api_docs_page()

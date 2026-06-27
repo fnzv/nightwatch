@@ -1,0 +1,24 @@
+name: CVE Push Notifications (ntfy.sh)
+
+on:
+  schedule:
+    - cron: '30 */4 * * *'  # 30 min after daily build (build runs at :00 each 4h)
+  workflow_dispatch:          # manual trigger from Actions tab
+
+jobs:
+  ntfy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Send ntfy.sh notifications
+        env:
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}   # optional — for self-hosted ntfy
+        run: python3 notify_ntfy.py

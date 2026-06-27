@@ -2046,6 +2046,9 @@ def write_sitemap(cve_pages, date_str, base_url=BASE_URL, vendor_pages=None,
     entries.append(url_entry(f"{base_url}/grafana.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/agents.html", "monthly", "0.6"))
     entries.append(url_entry(f"{base_url}/n8n.html", "monthly", "0.6"))
+    entries.append(url_entry(f"{base_url}/subscribe.html", "monthly", "0.6"))
+    for slug in _PRODUCT_FEED_CFGS:
+        entries.append(url_entry(f"{base_url}/feed/{slug}.xml", "hourly", "0.5"))
     entries.append(url_entry(f"{base_url}/stats.html", "daily", "0.7"))
     entries.append(url_entry(f"{base_url}/search.html", "weekly", "0.6"))
     entries.append(url_entry(f"{base_url}/how-to-scan.html", "monthly", "0.5"))
@@ -2362,6 +2365,7 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
       <a class="hlink" href="/grafana.html">&#128202;&nbsp;Grafana</a>
       <a class="hlink" href="/n8n.html">&#9889;&nbsp;n8n</a>
       <a class="hlink" href="/agents.html">&#129302;&nbsp;Agents</a>
+      <a class="hlink" href="/subscribe.html" style="border-color:#16a34a;color:#4ade80">&#128276;&nbsp;Subscribe</a>
       <a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>
       <a class="hlink" href="/api.html">API</a>
       <a class="hlink" href="/vulns.json">{&nbsp;}&nbsp;JSON</a>
@@ -6959,6 +6963,387 @@ function copyCode(btn) {{
     log("  Written: n8n.html")
 
 
+_PRODUCT_FEED_CFGS = {
+    "kubernetes":   {"label": "Kubernetes",        "sources": {"kubernetes"},               "keywords": ["kubernetes","k8s","etcd","kubelet","kube"]},
+    "ubuntu":       {"label": "Ubuntu",            "sources": {"ubuntu"},                   "keywords": []},
+    "debian":       {"label": "Debian",            "sources": {"debian"},                   "keywords": []},
+    "openstack":    {"label": "OpenStack",         "sources": {"openstack","oss-security"}, "keywords": ["openstack","nova","neutron","keystone","cinder","glance"]},
+    "linux-kernel": {"label": "Linux Kernel",      "sources": {"ubuntu","debian"},          "keywords": ["linux kernel","kernel","kvm","bpf","ebpf","netfilter"]},
+    "windows":      {"label": "Windows",           "sources": {"microsoft"},                "keywords": ["windows"],          "title_only": True},
+    "nginx":        {"label": "nginx / Traefik",   "sources": set(),                        "keywords": ["nginx","traefik"],   "title_only": True},
+    "cisco":        {"label": "Cisco",             "sources": {"cisco"},                    "keywords": []},
+    "fortinet":     {"label": "Fortinet",          "sources": {"fortinet"},                 "keywords": []},
+    "vmware":       {"label": "VMware / Broadcom", "sources": {"vmware"},                   "keywords": ["vmware","vsphere","vcenter","esxi"]},
+    "android":      {"label": "Android",           "sources": {"android"},                  "keywords": []},
+    "macos":        {"label": "macOS / Apple",     "sources": {"apple"},                    "keywords": []},
+}
+
+_NTFY_TOPICS = [
+    ("vulnfeed-critical",     "🚨", "All KEV (CISA) + CVSS ≥ 9.0",        "all sources"),
+    ("vulnfeed-kubernetes",   "⚙️", "Kubernetes CVEs (CVSS ≥ 7 or KEV)",   "kubernetes advisory feed"),
+    ("vulnfeed-ubuntu",       "🐧", "Ubuntu security advisories",           "ubuntu"),
+    ("vulnfeed-debian",       "🐧", "Debian security advisories",           "debian"),
+    ("vulnfeed-openstack",    "☁️", "OpenStack vulnerabilities",            "openstack, oss-security"),
+    ("vulnfeed-linux-kernel", "🐧", "Linux kernel CVEs",                    "ubuntu + debian advisories"),
+    ("vulnfeed-windows",      "🪟", "Windows vulnerabilities",              "microsoft MSRC"),
+    ("vulnfeed-nginx",        "🌐", "nginx / Traefik CVEs",                 "all sources (title match)"),
+    ("vulnfeed-cisco",        "🔧", "Cisco security advisories",            "cisco"),
+    ("vulnfeed-fortinet",     "🛡", "Fortinet vulnerabilities",             "fortinet"),
+    ("vulnfeed-vmware",       "💾", "VMware / Broadcom CVEs",               "vmware"),
+    ("vulnfeed-android",      "📱", "Android security bulletins",           "android"),
+    ("vulnfeed-macos",        "🍎", "Apple / macOS vulnerabilities",        "apple"),
+]
+
+
+def _rss_product_matches(v, cfg):
+    sources    = cfg.get("sources") or set()
+    keywords   = cfg.get("keywords") or []
+    title_only = cfg.get("title_only", False)
+    src_ok     = (not sources) or (v.get("source", "").lower() in sources)
+    if not keywords:
+        return src_ok
+    hay = (
+        (v.get("title") or "") if title_only
+        else " ".join([v.get("id",""), v.get("title",""), v.get("description",""), *v.get("affected",[])])
+    )
+    kw_ok = any(kw in hay.lower() for kw in keywords)
+    return src_ok and kw_ok
+
+
+def write_product_rss_feeds(vulns, date_str, base_url=BASE_URL):
+    os.makedirs("feed", exist_ok=True)
+
+    def xe(s):
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    now_rfc = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+    for slug, cfg in _PRODUCT_FEED_CFGS.items():
+        label   = cfg["label"]
+        matched = sorted(
+            [v for v in vulns if v.get("published") and _rss_product_matches(v, cfg)],
+            key=lambda v: v.get("published",""),
+            reverse=True,
+        )[:100]
+
+        items = []
+        for v in matched:
+            title = xe(f'[{v.get("severity","?")}] {v["id"]}: {v.get("title","")}')[:200]
+            link  = xe(v.get("url",""))
+            desc  = xe((v.get("description") or "")[:500])
+            pub   = _rfc822(v.get("published",""))
+            guid  = xe(v.get("url") or v["id"])
+            items.append(
+                "  <item>\n"
+                f"    <title>{title}</title>\n"
+                f"    <link>{link}</link>\n"
+                f"    <description>{desc}</description>\n"
+                f"    <pubDate>{pub}</pubDate>\n"
+                f'    <guid isPermaLink="false">{guid}</guid>\n'
+                "  </item>"
+            )
+
+        feed_url = f"{base_url}/feed/{slug}.xml"
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+            "  <channel>\n"
+            f"    <title>vulnfeed — {xe(label)}</title>\n"
+            f"    <link>{base_url}</link>\n"
+            f"    <description>{xe(label)} security vulnerabilities — vulnfeed.it</description>\n"
+            "    <language>en-us</language>\n"
+            f"    <lastBuildDate>{now_rfc}</lastBuildDate>\n"
+            f'    <atom:link href="{feed_url}" rel="self" type="application/rss+xml"/>\n'
+            + "\n".join(items)
+            + "\n  </channel>\n</rss>"
+        )
+        path = os.path.join("feed", f"{slug}.xml")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(xml)
+
+    log(f"  Written: feed/{{}}.xml × {len(_PRODUCT_FEED_CFGS)} product feeds")
+
+
+def write_subscribe_page(base_url=BASE_URL):
+    extra_css = """
+.sub-wrap{max-width:860px;margin:0 auto;padding:2rem 1.5rem 4rem}
+.sub-hero{margin-bottom:2rem}
+.sub-hero h1{font-size:1.5rem;font-weight:800;color:#0f172a;margin-bottom:.35rem}
+.sub-hero p{font-size:.9rem;color:#475569;max-width:560px}
+.sub-section{margin-bottom:2.5rem;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}
+.sub-section-head{background:#0f172a;padding:.85rem 1.2rem;display:flex;align-items:center;gap:.6rem}
+.sub-section-head h2{font-size:.95rem;font-weight:700;color:#f1f5f9;margin:0}
+.sub-section-body{padding:1.2rem 1.4rem}
+.sub-section-desc{font-size:.83rem;color:#475569;margin-bottom:1.1rem}
+.sub-form-row{display:flex;gap:.6rem;margin-bottom:.9rem;flex-wrap:wrap}
+#sub-email-input{flex:1;min-width:220px;padding:.55rem .9rem;border:2px solid #e2e8f0;
+  border-radius:7px;font-size:.9rem;outline:none;transition:border-color .15s}
+#sub-email-input:focus{border-color:#2563eb}
+.sub-btn{padding:.55rem 1.4rem;background:#2563eb;color:#fff;border:none;border-radius:7px;
+  font-size:.88rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.sub-btn:hover{background:#1d4ed8}
+.topic-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.4rem;margin-bottom:.8rem}
+.topic-label{display:flex;align-items:center;gap:.4rem;font-size:.8rem;color:#374151;cursor:pointer;
+  padding:.3rem .5rem;border:1px solid #e2e8f0;border-radius:6px;transition:all .12s}
+.topic-label:hover{border-color:#2563eb;color:#2563eb}
+.topic-label input{accent-color:#2563eb;cursor:pointer}
+.sub-thanks{display:none;font-size:.88rem;color:#16a34a;padding:.5rem;background:#f0fdf4;
+  border-radius:6px;border:1px solid #bbf7d0}
+.ntfy-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.ntfy-table th{text-align:left;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;
+  font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;background:#f8fafc}
+.ntfy-table td{padding:.5rem .7rem;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.ntfy-table tr:last-child td{border-bottom:none}
+.topic-name{font-family:monospace;font-weight:700;color:#0f172a;font-size:.8rem}
+.ntfy-btn{display:inline-flex;align-items:center;gap:.25rem;padding:.22rem .65rem;
+  border-radius:5px;font-size:.73rem;font-weight:600;text-decoration:none;border:1px solid #e2e8f0;
+  color:#374151;background:#f8fafc;cursor:pointer;white-space:nowrap}
+.ntfy-btn:hover{border-color:#2563eb;color:#2563eb}
+.ntfy-btn-copy{background:none;border:1px solid #e2e8f0;cursor:pointer}
+.ntfy-btn-copy.copied{color:#16a34a;border-color:#bbf7d0}
+.rss-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.rss-table th{text-align:left;padding:.45rem .7rem;border-bottom:2px solid #e2e8f0;
+  font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;background:#f8fafc}
+.rss-table td{padding:.5rem .7rem;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.rss-table tr:last-child td{border-bottom:none}
+.feed-url{font-family:monospace;font-size:.77rem;color:#2563eb;text-decoration:none}
+.feed-url:hover{text-decoration:underline}
+.code-block{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:.9rem 1.1rem;
+  font-family:monospace;font-size:.78rem;line-height:1.6;overflow-x:auto;margin:.7rem 0 0;
+  white-space:pre;position:relative}
+.code-cp{position:absolute;top:.5rem;right:.6rem;background:#1e293b;border:1px solid #334155;
+  color:#94a3b8;border-radius:4px;padding:.15rem .5rem;font-size:.68rem;cursor:pointer}
+.code-cp:hover{color:#f1f5f9}
+.ntfy-install{display:flex;gap:.6rem;flex-wrap:wrap;margin:.5rem 0 1rem}
+.install-link{display:inline-flex;align-items:center;gap:.3rem;padding:.32rem .75rem;
+  border:1px solid #e2e8f0;border-radius:6px;font-size:.78rem;color:#374151;text-decoration:none;font-weight:600}
+.install-link:hover{border-color:#2563eb;color:#2563eb}
+"""
+
+    # build ntfy topic rows
+    ntfy_rows = ""
+    for topic, icon, desc, source in _NTFY_TOPICS:
+        web_url = f"https://ntfy.sh/{topic}"
+        ntfy_rows += (
+            f'<tr>'
+            f'<td><span class="topic-name">{topic}</span></td>'
+            f'<td>{icon} {_xe(desc)}</td>'
+            f'<td><small style="color:#64748b">{_xe(source)}</small></td>'
+            f'<td style="white-space:nowrap">'
+            f'<a class="ntfy-btn" href="{web_url}" target="_blank" rel="noopener">Web ↗</a> '
+            f'<button class="ntfy-btn ntfy-btn-copy" onclick="cpTopic(this,\'{topic}\')" title="Copy ntfy topic URL">Copy</button>'
+            f'</td>'
+            f'</tr>'
+        )
+
+    # build RSS feed rows
+    rss_rows = (
+        '<tr>'
+        '<td><strong>All CVEs</strong></td>'
+        f'<td><a class="feed-url" href="{base_url}/feed.xml">/feed.xml</a></td>'
+        '<td><button class="ntfy-btn ntfy-btn-copy" onclick="cpFeed(this,\'/feed.xml\')">Copy</button></td>'
+        '</tr>'
+    )
+    for slug, cfg in _PRODUCT_FEED_CFGS.items():
+        feed_path = f"/feed/{slug}.xml"
+        rss_rows += (
+            f'<tr>'
+            f'<td><strong>{_xe(cfg["label"])}</strong></td>'
+            f'<td><a class="feed-url" href="{base_url}{feed_path}">{feed_path}</a></td>'
+            f'<td><button class="ntfy-btn ntfy-btn-copy" onclick="cpFeed(this,\'{feed_path}\')" >Copy</button></td>'
+            f'</tr>'
+        )
+
+    # build email topic checkboxes
+    topic_checks = ""
+    email_topics = [
+        ("kubernetes",   "Kubernetes"),
+        ("ubuntu",       "Ubuntu"),
+        ("debian",       "Debian"),
+        ("openstack",    "OpenStack"),
+        ("linux-kernel", "Linux Kernel"),
+        ("windows",      "Windows"),
+        ("cisco",        "Cisco"),
+        ("fortinet",     "Fortinet"),
+        ("vmware",       "VMware"),
+        ("android",      "Android"),
+        ("macos",        "macOS"),
+        ("nginx",        "nginx"),
+    ]
+    for slug, label in email_topics:
+        topic_checks += (
+            f'<label class="topic-label">'
+            f'<input type="checkbox" class="topic-check" value="{slug}"> {_xe(label)}'
+            f'</label>'
+        )
+
+    html = _page_head(
+        "Subscribe — vulnfeed",
+        "Get real-time CVE notifications via email digest, ntfy.sh push, or RSS. "
+        "No account required for push and RSS.",
+        f"{base_url}/subscribe.html",
+        "",
+        extra_css=extra_css,
+    ) + _page_header(extra_links='<a class="hlink" href="/feed.xml">&#9656;&nbsp;RSS</a>') + f"""
+<div class="sub-wrap">
+  <div class="sub-hero">
+    <h1>&#128276; Subscribe to vulnfeed</h1>
+    <p>Choose how you want to be notified when critical CVEs drop — email digests, push notifications, or RSS. Updated every 4 hours.</p>
+  </div>
+
+  <!-- ── EMAIL ─────────────────────────────────────────── -->
+  <div class="sub-section">
+    <div class="sub-section-head">
+      <span style="font-size:1.15rem">&#128231;</span>
+      <h2>Email digest (via Buttondown)</h2>
+    </div>
+    <div class="sub-section-body">
+      <p class="sub-section-desc">
+        Weekly digest every Monday with top CVEs, CISA KEV alerts, and per-product sections.
+        Tick any products below to receive a <strong>filtered digest</strong> for that technology in addition to the general one.
+      </p>
+
+      <div class="sub-form-row">
+        <input type="email" id="sub-email-input" placeholder="your@email.com" autocomplete="email">
+        <button class="sub-btn" onclick="doSubscribe()">Subscribe</button>
+      </div>
+
+      <div style="font-size:.75rem;color:#64748b;margin-bottom:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em">
+        Optional — product-specific digests:
+      </div>
+      <div class="topic-grid">
+        {topic_checks}
+      </div>
+      <div style="font-size:.74rem;color:#64748b;margin-top:.4rem">
+        No spam. Unsubscribe any time.
+        Powered by <a href="https://buttondown.com/vulnfeed" target="_blank" rel="noopener" style="color:#2563eb">Buttondown</a>.
+      </div>
+      <div class="sub-thanks" id="sub-thanks">&#10003; Subscribed! See you Monday.</div>
+    </div>
+  </div>
+
+  <!-- ── NTFY PUSH ──────────────────────────────────────── -->
+  <div class="sub-section">
+    <div class="sub-section-head">
+      <span style="font-size:1.15rem">&#128276;</span>
+      <h2>Push notifications (ntfy.sh)</h2>
+    </div>
+    <div class="sub-section-body">
+      <p class="sub-section-desc">
+        <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600">ntfy.sh</a>
+        is a free open-source push notification service. No account required.
+        Subscribe to a topic and get push alerts the moment a matching CVE is published.
+      </p>
+
+      <div style="font-size:.78rem;font-weight:600;color:#374151;margin-bottom:.4rem">Install the ntfy app:</div>
+      <div class="ntfy-install">
+        <a class="install-link" href="https://apps.apple.com/us/app/ntfy/id1625396347" target="_blank" rel="noopener">&#127822; iOS App</a>
+        <a class="install-link" href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">&#129474; Android</a>
+        <a class="install-link" href="https://ntfy.sh/app" target="_blank" rel="noopener">&#127760; Web</a>
+        <a class="install-link" href="https://docs.ntfy.sh/subscribe/phone/" target="_blank" rel="noopener">&#128196; CLI &amp; Desktop</a>
+      </div>
+
+      <table class="ntfy-table">
+        <tr>
+          <th>Topic</th>
+          <th>Covers</th>
+          <th>Source</th>
+          <th>Subscribe</th>
+        </tr>
+        {ntfy_rows}
+      </table>
+
+      <div style="margin-top:1.1rem;font-size:.78rem;font-weight:600;color:#374151">Test in terminal:</div>
+      <div class="code-block">curl -s https://ntfy.sh/vulnfeed-critical/json<button class="code-cp" onclick="cp(this,'curl -s https://ntfy.sh/vulnfeed-critical/json')">Copy</button></div>
+
+      <div style="margin-top:.9rem;font-size:.78rem;font-weight:600;color:#374151">Subscribe via CLI:</div>
+      <div class="code-block">ntfy subscribe vulnfeed-critical<button class="code-cp" onclick="cp(this,'ntfy subscribe vulnfeed-critical')">Copy</button></div>
+    </div>
+  </div>
+
+  <!-- ── RSS ───────────────────────────────────────────── -->
+  <div class="sub-section">
+    <div class="sub-section-head">
+      <span style="font-size:1.15rem">&#9656;</span>
+      <h2>RSS feeds</h2>
+    </div>
+    <div class="sub-section-body">
+      <p class="sub-section-desc">
+        Subscribe in any RSS reader — Feedly, NetNewsWire, Miniflux, Thunderbird, etc.
+        Per-product feeds update every 4 hours with the latest vulnerabilities for that technology.
+      </p>
+      <table class="rss-table">
+        <tr>
+          <th>Feed</th>
+          <th>URL</th>
+          <th></th>
+        </tr>
+        {rss_rows}
+      </table>
+      <div style="margin-top:.9rem;font-size:.78rem;font-weight:600;color:#374151">Add to Feedly:</div>
+      <div class="code-block">https://feedly.com/i/subscription/feed%2F{base_url}%2Ffeed%2Fkubernetes.xml<button class="code-cp" onclick="cp(this,'https://feedly.com/i/subscription/feed%2F{base_url}%2Ffeed%2Fkubernetes.xml')">Copy</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function doSubscribe() {{
+  const email = document.getElementById('sub-email-input').value.trim();
+  if (!email || !email.includes('@')) {{
+    document.getElementById('sub-email-input').focus();
+    return;
+  }}
+  const checks = document.querySelectorAll('.topic-check:checked');
+  const tags   = Array.from(checks).map(c => c.value).join(',');
+  const body   = new FormData();
+  body.append('email', email);
+  if (tags) body.append('tag', tags);
+  fetch('https://buttondown.com/api/emails/embed-subscribe/vulnfeed', {{method:'POST',body}})
+    .then(r => {{
+      if (r.ok || r.status === 200 || r.status === 201) {{
+        document.getElementById('sub-thanks').style.display = 'block';
+        document.querySelector('.sub-form-row').style.display = 'none';
+        document.querySelector('.topic-grid').style.display = 'none';
+        try {{ localStorage.setItem('vf_subscribed','1'); }} catch(_) {{}}
+      }} else {{
+        window.open('https://buttondown.com/vulnfeed','_blank');
+      }}
+    }})
+    .catch(() => window.open('https://buttondown.com/vulnfeed','_blank'));
+}}
+document.getElementById('sub-email-input').addEventListener('keydown', e => {{
+  if (e.key === 'Enter') doSubscribe();
+}});
+function cpTopic(btn, topic) {{
+  const url = 'https://ntfy.sh/' + topic;
+  navigator.clipboard.writeText(url).then(() => {{
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1800);
+  }});
+}}
+function cpFeed(btn, path) {{
+  navigator.clipboard.writeText('{base_url}' + path).then(() => {{
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.textContent = 'Copy'; btn.classList.remove('copied'); }}, 1800);
+  }});
+}}
+function cp(btn, text) {{
+  navigator.clipboard.writeText(text).then(() => {{
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => {{ btn.textContent = orig; }}, 1500);
+  }});
+}}
+</script>
+</html>
+"""
+    with open("subscribe.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    log("  Written: subscribe.html")
+
+
 def write_monthly_archive_pages(hist_dates, date_str, base_url=BASE_URL):
     """Generate /archive/YYYY-MM.html per month + /archive/index.html."""
     os.makedirs("archive", exist_ok=True)
@@ -7511,6 +7896,8 @@ def main():
     write_n8n_guide_page()
     write_agents_page()
     write_llms_txt(vulns, date_str)
+    write_product_rss_feeds(vulns, date_str)
+    write_subscribe_page()
     log("Writing vendor pages...")
     vendor_pages = write_vendor_pages(vulns, date_str)
     log("Writing CWE pages...")

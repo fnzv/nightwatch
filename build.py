@@ -2340,6 +2340,17 @@ kbd{background:#f1f5f9;padding:.1rem .3rem;border-radius:3px;border:1px solid #c
 #sub-modal-thanks{font-size:.88rem;color:#4ade80;text-align:center;padding:.5rem 0;display:none}
 #sub-open-btn{padding:.22rem .7rem;border-radius:5px;background:transparent;color:#94a3b8;border:1px solid #334155;font-size:.75rem;cursor:pointer;white-space:nowrap}
 #sub-open-btn:hover{border-color:#60a5fa;color:#f1f5f9}
+/* Subscribe strip */
+#sub-strip{background:#eff6ff;border-bottom:1px solid #bfdbfe;padding:.6rem 2rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;font-size:.8rem}
+.sstlabel{font-weight:700;color:#1e3a8a;flex-shrink:0}
+.sstlinks{display:flex;gap:.4rem;flex-wrap:wrap;flex:1}
+.sstbtn{display:inline-flex;align-items:center;padding:.24rem .7rem;border:1px solid #bfdbfe;border-radius:5px;color:#1d4ed8;background:#fff;font-size:.76rem;font-weight:600;text-decoration:none;white-space:nowrap;cursor:pointer}
+.sstbtn:hover{border-color:#2563eb;background:#dbeafe}
+.sstbtn-main{background:#2563eb;color:#fff;border-color:#2563eb}
+.sstbtn-main:hover{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.sst-x{background:none;border:none;cursor:pointer;color:#93c5fd;font-size:1rem;padding:0;line-height:1;margin-left:auto;flex-shrink:0}
+.sst-x:hover{color:#1e3a8a}
+@media(max-width:640px){#sub-strip{padding-left:1rem;padding-right:1rem}}
 </style>
 </head>
 <body>
@@ -2460,6 +2471,27 @@ __CWE_INDEX_HTML__
   </div>
 </div>
 
+<div id="sub-strip">
+  <span class="sstlabel">&#128276; Get notified about critical CVEs</span>
+  <div class="sstlinks">
+    <a class="sstbtn" href="#" onclick="document.getElementById('sub-open-btn').click();return false">&#128231;&nbsp;Email digest</a>
+    <a class="sstbtn" href="https://ntfy.sh/vulnfeed-critical" target="_blank" rel="noopener">&#128276;&nbsp;Push (ntfy.sh)</a>
+    <a class="sstbtn" href="/feed.xml">&#9656;&nbsp;RSS</a>
+    <a class="sstbtn sstbtn-main" href="/subscribe.html">All options &rarr;</a>
+  </div>
+  <button class="sst-x" onclick="dismissSubStrip()" title="Dismiss">&#10005;</button>
+</div>
+<script>
+(function(){
+  if(localStorage.getItem('vf_sub_dismissed')||localStorage.getItem('vf_subscribed')){
+    document.getElementById('sub-strip').style.display='none';
+  }
+})();
+function dismissSubStrip(){
+  document.getElementById('sub-strip').style.display='none';
+  try{localStorage.setItem('vf_sub_dismissed','1');}catch(_){}
+}
+</script>
 <div id="vf-loading" style="text-align:center;padding:3rem 1rem;color:#64748b;font-size:.9rem">Loading vulnerabilities…</div>
 <div id="grid"></div>
 <div id="empty"><h2>No results</h2><p>Try a different keyword or clear the filters.</p></div>

@@ -7216,7 +7216,6 @@ def write_subscribe_page(base_url=BASE_URL):
       </div>
       <div style="font-size:.74rem;color:#64748b;margin-top:.4rem">
         No spam. Unsubscribe any time.
-        Powered by <a href="https://buttondown.com/vulnfeed" target="_blank" rel="noopener" style="color:#2563eb">Buttondown</a>.
       </div>
       <div class="sub-thanks" id="sub-thanks">&#10003; Subscribed! See you Monday.</div>
     </div>

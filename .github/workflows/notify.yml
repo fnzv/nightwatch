@@ -22,3 +22,8 @@ jobs:
         env:
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}   # optional — for self-hosted ntfy
         run: python3 notify_ntfy.py
+
+      - name: Send email alerts (critical/KEV)
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+        run: python3 notify_email.py

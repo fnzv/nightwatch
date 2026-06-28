@@ -92,13 +92,18 @@ def product_matches(v, cfg):
     return src_ok and kw_ok
 
 
+def _ascii(s):
+    """Strip non-ASCII so header encoding never raises latin-1 errors."""
+    return s.encode("ascii", "replace").decode("ascii")
+
+
 def ntfy_post(topic, title, body, tags=None, priority=3, msg_id=None):
     req = urllib.request.Request(
         f"{NTFY_BASE}/{topic}",
-        data=body.encode(),
+        data=body.encode("utf-8"),
         method="POST",
     )
-    req.add_header("Title", title)
+    req.add_header("Title", _ascii(title))
     req.add_header("Priority", str(priority))
     if tags:
         req.add_header("Tags", ",".join(tags))
@@ -142,7 +147,7 @@ def run():
 
         ntfy_post(
             "vulnfeed-critical",
-            f"{'🚨 KEV' if is_kev else '⚠️ CVSS ' + str(score)} — {cve_id}",
+            f"{'[KEV]' if is_kev else '[CVSS ' + str(score) + ']'} {cve_id}",
             f"{desc}\n\nhttps://vulnfeed.it/cve/{cve_id}.html",
             tags=tags,
             priority=5 if is_kev else 4,
@@ -163,9 +168,9 @@ def run():
         n_crit = sum(1 for v in pool if (v.get("score") or 0) >= 9.0)
         title  = f"{len(pool)} new {product} CVE{'s' if len(pool) != 1 else ''}"
         if n_kev:
-            title = f"🚨 {title} ({n_kev} KEV)"
+            title = f"[KEV] {title} ({n_kev} actively exploited)"
         elif n_crit:
-            title = f"⚠️ {title} ({n_crit} critical)"
+            title = f"[CRIT] {title} ({n_crit} critical)"
 
         lines = [
             "• {id}  CVSS {score}{kev}{poc}".format(
